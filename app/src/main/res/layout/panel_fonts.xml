@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp">
+
+        <TextView style="@style/ColorRowLabel" android:text="Font" />
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/fontList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal" />
+
+        <TextView style="@style/ColorRowLabel" android:layout_marginTop="20dp" android:text="Alignment" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+            <TextView android:id="@+id/chipAlignLeft" style="@style/BreakChip" android:text="Left" />
+            <TextView android:id="@+id/chipAlignCenter" style="@style/BreakChip" android:text="Center" />
+            <TextView android:id="@+id/chipAlignRight" style="@style/BreakChip" android:text="Right" />
+        </LinearLayout>
+
+        <TextView style="@style/ColorRowLabel" android:layout_marginTop="14dp" android:text="Line spacing" />
+        <SeekBar
+            android:id="@+id/seekLineSpacing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="40" />
+
+        <TextView style="@style/ColorRowLabel" android:text="Word spacing" />
+        <SeekBar
+            android:id="@+id/seekWordSpacing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="60" />
+
+        <TextView style="@style/ColorRowLabel" android:layout_marginTop="8dp" android:text="Capitalization" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+            <TextView android:id="@+id/chipCapNone" style="@style/BreakChip" android:text="None" />
+            <TextView android:id="@+id/chipCapUpper" style="@style/BreakChip" android:text="UPPERCASE" />
+            <TextView android:id="@+id/chipCapLower" style="@style/BreakChip" android:text="lowercase" />
+            <TextView android:id="@+id/chipCapTitle" style="@style/BreakChip" android:text="Title Case" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

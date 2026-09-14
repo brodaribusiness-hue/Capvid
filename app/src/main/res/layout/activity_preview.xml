@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <VideoView
+        android:id="@+id/videoView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <com.saad.capvid.caption.CaptionOverlayView
+        android:id="@+id/captionOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="@drawable/bg_rounded_panel"
+        android:padding="20dp">
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:text="Preparing..." />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:max="100"
+            android:progress="0"
+            android:progressTint="@color/purple_primary" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageButton
+                android:id="@+id/btnPlayPause"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@android:color/transparent"
+                android:src="@android:drawable/ic_media_pause"
+                android:contentDescription="Play or pause"
+                app:tint="@color/purple_accent" />
+
+            <SeekBar
+                android:id="@+id/videoSeekBar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:progressTint="@color/purple_primary"
+                android:thumbTint="@color/purple_accent" />
+
+        </LinearLayout>
+
+        <!-- Trim / Scale toggle buttons -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/btnTrimToggle"
+                style="@style/BreakChip"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:gravity="center"
+                android:text="Trim" />
+
+            <TextView
+                android:id="@+id/btnScaleToggle"
+                style="@style/BreakChip"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Scale" />
+        </LinearLayout>
+
+        <!-- Trim panel -->
+        <LinearLayout
+            android:id="@+id/trimPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/trimRangeLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:text="Trim: 0:00 - 0:00" />
+
+            <com.google.android.material.slider.RangeSlider
+                android:id="@+id/trimRangeSlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:trackColorActive="@color/purple_primary"
+                app:trackColorInactive="@color/surface_dark"
+                app:thumbColor="@color/purple_accent"
+                android:valueFrom="0"
+                android:valueTo="1"
+                android:stepSize="0.1" />
+        </LinearLayout>
+
+        <!-- Scale panel -->
+        <LinearLayout
+            android:id="@+id/scalePanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/scaleLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"
+                android:text="Scale: 100%" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/scaleSlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:trackColorActive="@color/purple_primary"
+                app:trackColorInactive="@color/surface_dark"
+                app:thumbColor="@color/purple_accent"
+                android:valueFrom="50"
+                android:valueTo="150"
+                android:stepSize="5"
+                android:value="100" />
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnChooseTemplate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp"
+            android:text="Choose Template"
+            android:textAllCaps="false"
+            android:textSize="15sp"
+            app:backgroundTint="@color/surface_dark"
+            app:strokeColor="@color/purple_primary"
+            app:strokeWidth="1dp"
+            app:cornerRadius="24dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Caption Style"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <Spinner
+            android:id="@+id/styleSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:popupBackground="@color/surface_dark" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Text Size"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
+
+        <Spinner
+            android:id="@+id/sizeSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:popupBackground="@color/surface_dark" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:orientation="horizontal">
+
+            <CheckBox
+                android:id="@+id/checkBold"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:buttonTint="@color/purple_accent"
+                android:textColor="@color/text_primary"
+                android:text="Bold" />
+
+            <CheckBox
+                android:id="@+id/checkItalic"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:buttonTint="@color/purple_accent"
+                android:textColor="@color/text_primary"
+                android:text="Italic" />
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnExport"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:text="Export"
+            android:textAllCaps="false"
+            android:textSize="16sp"
+            app:backgroundTint="@color/purple_primary"
+            app:cornerRadius="28dp" />
+
+    </LinearLayout>
+
+</FrameLayout>
