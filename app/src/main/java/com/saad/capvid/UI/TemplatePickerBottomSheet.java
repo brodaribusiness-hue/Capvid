@@ -1,5 +1,6 @@
 package com.saad.capvid.ui.template;
 
+import android.app.Dialog;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -14,6 +15,8 @@ import androidx.appcompat.widget.SwitchCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.bottomsheet.BottomSheetBehavior;
+import com.google.android.material.bottomsheet.BottomSheetDialog;
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment;
 import com.saad.capvid.R;
 import com.saad.capvid.font.FontManager;
@@ -122,6 +125,22 @@ public class TemplatePickerBottomSheet extends BottomSheetDialogFragment {
         view.findViewById(R.id.btnApply).setOnClickListener(v -> onApplyClicked());
 
         showPanel(tabTemplate);
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        Dialog dialog = getDialog();
+        if (!(dialog instanceof BottomSheetDialog)) return;
+        View bottomSheet = ((BottomSheetDialog) dialog)
+                .findViewById(com.google.android.material.R.id.design_bottom_sheet);
+        if (bottomSheet == null) return;
+        ViewGroup.LayoutParams lp = bottomSheet.getLayoutParams();
+        lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+        bottomSheet.setLayoutParams(lp);
+        BottomSheetBehavior<View> behavior = BottomSheetBehavior.from(bottomSheet);
+        behavior.setSkipCollapsed(true);
+        behavior.setState(BottomSheetBehavior.STATE_EXPANDED);
     }
 
     // ================= TOP TABS =================
