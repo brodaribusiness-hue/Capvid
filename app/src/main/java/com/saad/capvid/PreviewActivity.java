@@ -405,6 +405,17 @@ public class PreviewActivity extends AppCompatActivity {
                     retriever.setDataSource(realPath);
                     videoWidth = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
                     videoHeight = Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+                    String rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+                    int rotation = rotationStr != null ? Integer.parseInt(rotationStr) : 0;
+                    if (rotation == 90 || rotation == 270) {
+                        // ffmpeg auto-rotates the decoded frame to match how it actually
+                        // displays, but the raw metadata above is pre-rotation — swap so
+                        // the .ass canvas (and caption \pos placement) matches the frame
+                        // ffmpeg's ass filter actually draws onto.
+                        int tmp = videoWidth;
+                        videoWidth = videoHeight;
+                        videoHeight = tmp;
+                    }
                 } finally {
                     retriever.release();
                 }
