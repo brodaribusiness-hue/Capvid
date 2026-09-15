@@ -385,12 +385,19 @@ public class CaptionOverlayView extends View {
     }
 
     private int findActiveWordIndex() {
-        if (words == null) return -1;
+        if (words == null || words.isEmpty()) return -1;
+        if (currentTimeMs < words.get(0).startMs) return -1;
+        // A word stays "active" from its own start until the NEXT word's start
+        // (not just until its own endMs). Whisper timestamps almost always leave
+        // a small gap between words, and the old exact-window check meant no
+        // caption was drawn at all during every such gap. The last word gets a
+        // short trailing buffer instead of a "next start" to fall back on.
         for (int i = 0; i < words.size(); i++) {
             CaptionWord w = words.get(i);
-            if (currentTimeMs >= w.startMs && currentTimeMs <= w.endMs) return i;
+            long segmentEnd = (i < words.size() - 1) ? words.get(i + 1).startMs : w.endMs + 400;
+            if (currentTimeMs >= w.startMs && currentTimeMs < segmentEnd) return i;
         }
-        return -1;
+        return words.size() - 1;
     }
 
     private float getProgress(CaptionWord w) {
