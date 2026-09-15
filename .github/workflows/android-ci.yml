@@ -11,6 +11,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,15 +29,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses || true
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT || true
 
-      - name: Set up NDK / CMake
+      - name: Install NDK / CMake
         run: |
-          yes | sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT "ndk;26.1.10909125" "cmake;3.22.1"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
