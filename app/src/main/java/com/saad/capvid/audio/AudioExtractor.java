@@ -8,10 +8,25 @@ import android.net.Uri;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
-import java.util.List;
 
 public class AudioExtractor {
+
+    /** Minimal growable primitive short buffer — avoids the per-sample
+     *  autoboxing of List&lt;Short&gt;, which was slow enough on longer clips
+     *  to make "Extracting audio..." look frozen. */
+    private static final class ShortBuffer {
+        short[] data = new short[1 << 16];
+        int size = 0;
+
+        void add(short v) {
+            if (size == data.length) {
+                short[] grown = new short[data.length * 2];
+                System.arraycopy(data, 0, grown, 0, size);
+                data = grown;
+            }
+            data[size++] = v;
+        }
+    }
 
     public static float[] extractPcm16k(Context context, Uri videoUri) throws Exception {
         MediaExtractor extractor = new MediaExtractor();
@@ -42,7 +57,7 @@ public class AudioExtractor {
         decoder.configure(audioFormat, null, null, 0);
         decoder.start();
 
-        List<Short> pcmSamples = new ArrayList<>();
+        ShortBuffer pcmSamples = new ShortBuffer();
         MediaCodec.BufferInfo bufferInfo = new MediaCodec.BufferInfo();
         boolean inputDone = false;
         boolean outputDone = false;
@@ -84,12 +99,12 @@ public class AudioExtractor {
         return monoFloat;
     }
 
-    private static float[] toMonoFloat(List<Short> samples, int channelCount) {
-        int frameCount = samples.size() / channelCount;
+    private static float[] toMonoFloat(ShortBuffer samples, int channelCount) {
+        int frameCount = samples.size / channelCount;
         float[] mono = new float[frameCount];
         for (int i = 0; i < frameCount; i++) {
             int sum = 0;
-            for (int c = 0; c < channelCount; c++) sum += samples.get(i * channelCount + c);
+            for (int c = 0; c < channelCount; c++) sum += samples.data[i * channelCount + c];
             mono[i] = (sum / (float) channelCount) / 32768.0f;
         }
         return mono;
