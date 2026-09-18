@@ -62,7 +62,7 @@ Run **35295977165** — every step `success`:
 | Checkout with pinned submodules | success — `whisper/include/whisper.h` present at `927cfce3…` |
 | Static contract audit | success — 0 errors, 0 warnings |
 | Gradle wrapper validation | success — jar hash accepted by `gradle/actions/wrapper-validation@v4` |
-| `testDebugUnitTest` | success — **30 tests, 0 failures, 0 errors, 0 skipped** |
+| `testDebugUnitTest` | success — **44 tests, 0 failures, 0 errors, 0 skipped** |
 | `lintDebug` | success |
 | `assembleDebug` (compiles the native whisper.cpp bridge with NDK 26.1.10909125 / CMake 3.22.1 for `arm64-v8a` + `armeabi-v7a`) | success — APK 27,607,385 bytes |
 | `assembleRelease` | success |
@@ -302,6 +302,19 @@ spoken one highlighted**. It also:
 
 **The architectural fix: one layout engine, two renderers.**
 
+> **Correction, added after user testing.** Sharing `CaptionLayout` fixed *which
+> words are on a line and when*, and that part holds. It did **not** fix the
+> placement, and I claimed the divergence was closed when it was not. The
+> preview positioned the caption as a fraction of the **screen** while the
+> exporter used a fraction of the **video**, and since `VideoView` letterboxes
+> the picture inside a `match_parent` view those are different places - on a
+> portrait phone playing a landscape clip the caption sat in the black bar on
+> screen but inside the picture in the export, at several times the wrong size.
+> Unit tests over `CaptionLayout` could not catch this because the divergence
+> was in the *coordinate space handed to* the layout, not in the layout. It is
+> fixed by CAP-031. Four further export-fidelity defects came out of the same
+> report: CAP-032 to CAP-035.
+
 New class `com.saad.capvid.caption.CaptionLayout` is the single source of truth
 for line composition and line timing. It is free of `android.*` imports so it can
 be unit-tested on the JVM. `CaptionOverlayView.regroupLines()` and
@@ -506,7 +519,17 @@ marked otherwise.
 | CAP-029 | BLOCKER | BUILD | `gradlew`, `gradlew.bat` | `gradlew` was a 1677-byte hand-written stub, not the script Gradle 8.5 generates. It ran `exec "$JAVACMD" $DEFAULT_JVM_OPTS -jar "$APP_HOME/wrapper/gradle-wrapper.jar" "$@"` — `$DEFAULT_JVM_OPTS` is `'\"-Xmx64m\" \"-Xms64m\"'` and is expanded without `eval`, so the embedded quotes survive word splitting and java is handed the literal string `"-Xmx64m"` as its main class; and the jar lives at `gradle/wrapper/`, not `wrapper/`. **Every build failed before Gradle started.** Found only because CI ran. | replaced both scripts with the authentic ones from `gradle/gradle` at tag `v8.5.0`; `gradle-wrapper.properties` deliberately left pointing at `gradle-8.5-bin.zip` (the v8.5.0 copy points at `gradle-8.5-rc-4`) | ran each script against a stub `java` on `JAVA_HOME`: old → `arg[1]=["-Xmx64m"]`, `.../wrapper/gradle-wrapper.jar`; new → `-Xmx64m`, `-classpath .../gradle/wrapper/gradle-wrapper.jar`, `org.gradle.wrapper.GradleWrapperMain`. CI run 35295532081 green |
 | CAP-030 | HIGH | EXPORT | `VideoExporter.export`, progress callback | `long t = statistics.getTime();` — FFmpegKit's `Statistics.getTime()` returns `double`, so `compileDebugJavaWithJavac` failed with *possible lossy conversion from double to long*. A hand-trace of the source cannot catch this; only a compiler can. | `Math.round(statistics.getTime())`, comment corrected | CI run 35295532081: `compileDebugJavaWithJavac` 1 error → 0 |
 
-**Counts by severity:** BLOCKER 5 · CRITICAL 6 · HIGH 8 · MEDIUM 8 · LOW 3 = **30 total, 29 fixed, 1 tracked** (CAP-026, i18n).
+| CAP-031 | BLOCKER | CAPTION/EXPORT | `CaptionOverlayView.onDraw`/`drawLine`/`onTouchEvent`, `AssSubtitleBuilder.build` | Preview placed the caption at `posYFraction * getHeight()` (fraction of the SCREEN) and sized it by `videoHeight / overlayHeight`; the exporter used `posYFraction * videoHeight` (fraction of the VIDEO). `activity_preview.xml` makes `VideoView` and the overlay `match_parent` siblings, and `VideoView` letterboxes the picture, so the two coordinate spaces differ - caption in the black bar on screen, inside the picture in the export, and several times too small | new `CaptionFrameGeometry.fittedVideoRect`; fractions now mean "of the video frame" in both places; preview converts through the rect, exporter multiplies into video pixels; drag and the 6%/94% insets use the rect | `CaptionFrameGeometryTest` (8 tests: fit, centring, never-exceeds-view, round-trip); CI 35306782273 |
+| CAP-032 | HIGH | FONT | `AssSubtitleBuilder` Style line, `StyleFontMap` | libass picks a face by family + weight, not filename. `RobotoMono-Bold.ttf` and `RobotoMono-Regular.ttf` both report family "Roboto Mono", so with Bold clear fontconfig could return Regular - the export came out lighter than the preview, which loads the file directly (2 catalog styles affected) | `StyleFontMap.assetIsBold/assetIsItalic`; Style Bold/Italic now include the asset's own weight | `boldFontAssetSetsTheStyleBoldFlag` |
+| CAP-033 | HIGH | CAPTION | `AssSubtitleBuilder.build` | `float blur = m.blur * scale;` was computed and **never used**, so `OUTLINE_GLOW`'s 6 templates exported with no glow at all - while `exportNotes` claimed "glow is approximated with libass blur". Separately, `\blur` on a text event is applied to the glyph **fill** bitmap (`ass_render.c:2726`), so `NEON_OUTLINE_GLOW` and `GLASSMORPHISM_CARD` exported as *blurry text*, not glowing text | glow is now a real halo: an extra event emitted before the text with a thick blurred transparent-fill outline; libass orders by (Layer, ReadOrder) at `ass_render.c:3100`, so it composites underneath; text-blur removed | `glowIsAHaloEmittedBeforeTheSharpTextNotABlurOnTheGlyphs`, `plainStylesEmitNoHalo` |
+| CAP-034 | MEDIUM | EXPORT | `StyleAssMapper.map` | `GRADIENT_FILL` (6 styles), `CHROME`, `LIQUID_GRADIENT_SWEEP` and `CHROME_METALLIC` were flattened to a single solid colour, so those templates looked nothing like their preview | `Mapping.gradientStops`; rendered as 10 clipped colour bands, each repeating the karaoke timings so the word highlight still advances. `\clip` is absolute script coords (`x2scr_pos_scaled`), which the band rects rely on | `gradientStylesEmitOneClippedEventPerBand`, `gradientBandsStillCarryTheKaraokeTimings`, `gradientInterpolationReachesBothEndStops` |
+| CAP-035 | MEDIUM | EXPORT | `VideoExporter.buildCommand`, `PreviewActivity` | The preview "Scale" slider was multiplied into the encoded frame size, so exporting at 50% produced 540p from a 1080p source - the largest single quality loss in the pipeline. The slider is a preview *zoom*: it scales `VideoView` and the overlay together, so the caption stays proportional at any zoom | export always keeps source resolution; the scale filter now only forces even dimensions; slider relabelled "Preview zoom"; CRF 20 → 18 | CI `assembleDebug`/`assembleRelease` green; command inspected |
+
+**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 10 · MEDIUM 10 · LOW 3 = **35 total, 34 fixed, 1 tracked** (CAP-026, i18n).
+
+CAP-031 to CAP-035 were found by a person using the app, not by reading it or by
+the 30 unit tests that were passing at the time. That is a real limit on what
+those tests prove, and it is why §12 still stops at internal testing.
 
 CAP-029 and CAP-030 were **not** found by reading the code — both were found by
 running the build. CAP-029 in particular invalidates the CAP-002 entry as it was
@@ -537,7 +560,9 @@ as WORKING — those are marked **CODE-COMPLETE (unverified)** and listed in §1
 ### COMPILES AND UNIT-TESTED, NOT YET RUN ON A DEVICE
 All of this is now compiled by CI (`assembleDebug` / `assembleRelease`), so it
 is no longer merely "code that exists". What is still unproven is runtime
-behaviour on hardware.
+behaviour on hardware - and the first device session already found five defects
+here (CAP-031 to CAP-035), so treat this list as "not yet looked at", not as
+"probably fine".
 - Shared layout engine and preview/export geometry agreement — **30 executed
   unit tests** cover the layout and ASS output; on-screen agreement still needs
   eyes on a phone
@@ -681,7 +706,7 @@ the camera flow are all preserved.
 | Timestamp units | `whisper.h:670` | **CONFIRMED centiseconds → `×10` correct** |
 | Gradle wrapper integrity | `sha256sum` + `wrapper-validation` | **PASS — `d3b261c2…`** |
 | Gradle wrapper scripts launch java correctly | local probe with a stub `java` | **PASS after CAP-029 — correct args and classpath** |
-| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 30 tests, 0 failed, 0 errored, 0 skipped** |
+| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 44 tests, 0 failed, 0 errored, 0 skipped** |
 | `lintDebug` | CI | **PASS** |
 | Native build (NDK 26.1.10909125 / CMake 3.22.1, both ABIs) | `./gradlew assembleDebug` (CI) | **PASS — APK 27,607,385 bytes; `libcapvid_native.so` in `arm64-v8a` and `armeabi-v7a`** |
 | Release build | `./gradlew assembleRelease` (CI) | **PASS** |
@@ -695,9 +720,10 @@ The breakdown, as reported by `tools/junit_summary.py` from Gradle's JUnit XML:
 
 | test class | tests | failures | errors | skipped |
 |---|---:|---:|---:|---:|
+| `com.saad.capvid.caption.CaptionFrameGeometryTest` | 8 | 0 | 0 | 0 |
 | `com.saad.capvid.caption.CaptionLayoutTest` | 12 | 0 | 0 | 0 |
-| `com.saad.capvid.export.AssSubtitleBuilderTest` | 18 | 0 | 0 | 0 |
-| **total** | **30** | **0** | **0** | **0** |
+| `com.saad.capvid.export.AssSubtitleBuilderTest` | 24 | 0 | 0 | 0 |
+| **total** | **44** | **0** | **0** | **0** |
 
 This corrects an earlier figure of 29 (12 + 17) that I quoted from a hand count;
 `grep -c '@Test'` on the two sources gives 12 and 18, and CI executed exactly 30.
@@ -749,12 +775,17 @@ Justification, without optimism:
 - The static auditor is green and gates CI, so the classes of defect it covers
   cannot silently return.
 
-Why it is not beta:
+Why it is not beta - and this is no longer hypothetical:
 
-- **No device has run this code.** Unit tests cover layout and ASS generation;
-  they do not cover transcription, playback, the FFmpeg export, or the Gallery
-  save. `VideoExporter`'s command line has never been executed against a real
-  video. One real export on a real phone is the minimum.
+- **The first round of human testing found five defects that 30 passing unit
+  tests and a green build had missed** (CAP-031 to CAP-035), including one
+  BLOCKER that put the burned-in caption in a different place than the preview
+  showed. They are fixed now, but the lesson stands: the tests cover the layout
+  and ASS-generation logic, not transcription, playback, the FFmpeg export or
+  the Gallery save. `VideoExporter`'s command line has still never been executed
+  against a real video, and nobody has yet looked at an exported frame. One real
+  export on a real phone, compared side by side with the preview, is the
+  minimum.
 - **The release APK is unsigned.** `assembleRelease` succeeding proves it
   compiles; there is no keystore configured (`keystore.properties` is optional),
   so nothing installable has been produced.
