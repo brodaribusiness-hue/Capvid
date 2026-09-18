@@ -92,5 +92,5 @@ object WordGrouping {
         .replace(Regex("\\s+"), " ")
         .trim()
         .replace(Regex("\\s+([,.!?;:%])"), "$1")
-        .replace(Regex("([([{])\\s+"), "$1")
+        .replace(Regex("([\\[({])\\s+"), "$1")
 }
