@@ -12,22 +12,30 @@ import android.graphics.Color;
  * javadoc, but nothing ever called it, so all 10 modern styles exported as
  * plain white text. It is now actually on the export path.)
  *
- * <p><b>IMPORTANT LIMITATION.</b> ASS/libass has no true gradient fill and no
- * BlurMaskFilter, so a handful of these treatments can only be approximated:
+ * <p><b>What this file does and does not do.</b> It only emits inline override
+ * tags - the things that can be expressed inside a single text run: colours,
+ * outline, alpha, rotation and {@code \t} transforms. Two classes of effect
+ * cannot be inline tags and are therefore declared on
+ * {@code StyleAssMapper.Mapping} instead, for {@code AssSubtitleBuilder} to
+ * render structurally:
  * <ul>
- *   <li>LIQUID_GRADIENT_SWEEP and CHROME_METALLIC burn in as a solid
- *       representative colour (their middle/lightest swatch) instead of an
- *       actual gradient. The live preview still shows the real Canvas gradient,
- *       so for these two the export is a deliberate simplification.</li>
- *   <li>NEON_OUTLINE_GLOW's glow is approximated with {@code \blur} (libass
- *       Gaussian edge blur), which is close but softer than the Canvas
- *       BlurMaskFilter version.</li>
- *   <li>GLASSMORPHISM_CARD has no true per-word translucent panel; it is
- *       approximated with a wide, semi-transparent outline.</li>
+ *   <li><b>Glow.</b> libass applies {@code \blur} to the glyph fill bitmap
+ *       (ass_render.c:2726), so putting it on the text blurs the letters rather
+ *       than glowing behind them. NEON_OUTLINE_GLOW therefore sets
+ *       {@code glowRadius}, which becomes a separate lower-layer event with a
+ *       thick blurred outline underneath the sharp text.</li>
+ *   <li><b>Gradient.</b> libass has no gradient primitive. LIQUID_GRADIENT_SWEEP
+ *       and CHROME_METALLIC set {@code gradientStops}, which becomes a stack of
+ *       clipped colour bands.</li>
+ * </ul>
+ *
+ * <p>Remaining deliberate simplifications:
+ * <ul>
+ *   <li>GLASSMORPHISM_CARD has no true per-word translucent panel; it is a
+ *       BorderStyle-3 box whose outline colour carries the alpha.</li>
  *   <li>SPLIT_REVEAL_SCAN's scan wipe is approximated by animating the outline
  *       away; a pixel-accurate wipe would need an animated {@code \clip}.</li>
  * </ul>
- * These are the only places where preview and export intentionally differ.
  */
 public class ModernStyleAssWriter {
 
@@ -69,8 +77,12 @@ public class ModernStyleAssWriter {
         if (styleId == null || swatch == null || swatch.length < 4) return "";
         switch (styleId) {
             case "NEON_OUTLINE_GLOW": {
+                // No \blur here: libass applies it to the glyph fill, which
+                // makes the letters fuzzy instead of glowing. The halo is a
+                // separate lower-layer event emitted by AssSubtitleBuilder from
+                // StyleAssMapper.Mapping.glowRadius.
                 String glow = bgr(isActiveWord ? swatch[0] : swatch[1]);
-                return "\\1c&HFFFFFF&\\3c" + glow + "\\bord4\\blur6\\shad0";
+                return "\\1c&HFFFFFF&\\3c" + glow + "\\bord4\\shad0";
             }
             case "LIQUID_GRADIENT_SWEEP": {
                 // gradient approximated as its middle colour for burned export
@@ -84,7 +96,7 @@ public class ModernStyleAssWriter {
                 String text = bgr(swatch[3]);
                 // \bord stands in for the translucent "card" edge, because ASS
                 // has no true per-word background box.
-                return "\\1c" + text + "\\3c" + box + "\\3a&H" + hex2(a) + "&\\bord8\\shad0\\blur3";
+                return "\\1c" + text + "\\3c" + box + "\\3a&H" + hex2(a) + "&\\bord8\\shad0";
             }
             case "CHROME_METALLIC": {
                 // metallic gradient approximated as its lightest swatch; the dark

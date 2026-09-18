@@ -138,7 +138,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
-                android:text="Scale: 100%" />
+                android:text="Preview zoom: 100%" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/scaleSlider"

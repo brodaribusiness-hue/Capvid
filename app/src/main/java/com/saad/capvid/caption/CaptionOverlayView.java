@@ -72,6 +72,17 @@ public class CaptionOverlayView extends View {
     private float dragStartX, dragStartY;
     private boolean dragging = false;
 
+    /**
+     * Display dimensions of the video being previewed, used to work out where
+     * the letterboxed picture actually sits inside this view. Zero until the
+     * player reports them, in which case the whole view is used.
+     */
+    private int videoDisplayWidth = 0;
+    private int videoDisplayHeight = 0;
+
+    /** Recomputed once per frame in onDraw, reused by drawLine. */
+    private CaptionFrameGeometry.Rect frameRect = new CaptionFrameGeometry.Rect(0f, 0f, 1f, 1f);
+
     public CaptionOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setLayerType(LAYER_TYPE_SOFTWARE, null);
@@ -119,6 +130,31 @@ public class CaptionOverlayView extends View {
     public float getPosXFraction() { return posXFraction; }
     public float getPosYFraction() { return posYFraction; }
 
+    /**
+     * Tells the overlay the video's display dimensions so the caption can be
+     * anchored to the picture rather than to the screen. {@code VideoView}
+     * letterboxes the video inside its {@code match_parent} bounds, and this
+     * overlay is a {@code match_parent} sibling of it, so without this the
+     * caption is positioned as a fraction of the screen while the burn-in
+     * positions it as a fraction of the video - two different places.
+     */
+    public void setVideoDisplaySize(int widthPx, int heightPx) {
+        if (widthPx == videoDisplayWidth && heightPx == videoDisplayHeight) return;
+        videoDisplayWidth = Math.max(0, widthPx);
+        videoDisplayHeight = Math.max(0, heightPx);
+        invalidate();
+    }
+
+    /**
+     * Where the video sits inside this view, in view pixels. Everything the
+     * exporter needs to reproduce the on-screen placement is derivable from
+     * this, which is why it is exposed rather than the individual fields.
+     */
+    public CaptionFrameGeometry.Rect getVideoRect() {
+        return CaptionFrameGeometry.fittedVideoRect(
+                getWidth(), getHeight(), videoDisplayWidth, videoDisplayHeight);
+    }
+
     // ------------------------------------------------------------------
     // Metrics the exporter needs in order to place the burned-in caption
     // where the preview actually puts it. Without these the export had to
@@ -165,8 +201,12 @@ public class CaptionOverlayView extends View {
         if (activeIndex == -1) return;
 
         float progress = getProgress(words.get(activeIndex));
-        float cx = posXFraction * getWidth();
-        float cy = posYFraction * getHeight();
+        // Caption position is expressed as a fraction of the VIDEO FRAME, not of
+        // this view - the exporter only knows the video, so both sides have to
+        // mean the same thing. Convert through the letterboxed rect.
+        frameRect = getVideoRect();
+        float cx = CaptionFrameGeometry.videoFractionXToView(frameRect, posXFraction);
+        float cy = CaptionFrameGeometry.videoFractionYToView(frameRect, posYFraction);
 
         if (styleType == CaptionStyleType.ZIGZAG_CALLIGRAPHY) {
             drawZigzagCalligraphy(canvas, activeIndex, cx, cy);
@@ -218,8 +258,12 @@ public class CaptionOverlayView extends View {
 
         float x;
         switch (options.alignment) {
-            case LEFT: x = getWidth() * 0.06f; break;
-            case RIGHT: x = getWidth() * 0.94f - totalWidth; break;
+            // The 6% / 94% insets are fractions of the VIDEO, matching the
+            // \an4 / \an6 x positions AssSubtitleBuilder writes. Using the view
+            // width here put the caption outside the picture whenever the video
+            // was pillarboxed.
+            case LEFT: x = frameRect.left + frameRect.width * 0.06f; break;
+            case RIGHT: x = frameRect.left + frameRect.width * 0.94f - totalWidth; break;
             case CENTER:
             default: x = cx - totalWidth / 2f; break;
         }
@@ -664,8 +708,13 @@ public class CaptionOverlayView extends View {
                 if (dragging) {
                     float dx = event.getX() - dragStartX;
                     float dy = event.getY() - dragStartY;
-                    posXFraction = Math.max(0.1f, Math.min(0.9f, posXFraction + dx / getWidth()));
-                    posYFraction = Math.max(0.1f, Math.min(0.9f, posYFraction + dy / getHeight()));
+                    // Divide by the video rect, not the view: the fractions are
+                    // fractions of the picture, so a drag of N view pixels has to
+                    // move the caption by N / displayedVideoSize of the frame.
+                    float rw = Math.max(1f, frameRect.width);
+                    float rh = Math.max(1f, frameRect.height);
+                    posXFraction = Math.max(0.1f, Math.min(0.9f, posXFraction + dx / rw));
+                    posYFraction = Math.max(0.1f, Math.min(0.9f, posYFraction + dy / rh));
                     dragStartX = event.getX(); dragStartY = event.getY();
                     invalidate();
                 }

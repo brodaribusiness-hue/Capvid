@@ -11,54 +11,70 @@ import java.util.Locale;
  * Builds the .ass subtitle file that FFmpeg's {@code ass} filter burns into the
  * exported video.
  *
- * <h3>What this replaces</h3>
- * The previous version emitted one {@code Dialogue} per <em>word</em>, and every
- * one of them was pinned to the same {@code \pos(x,y)}. Because each word has its
- * own time window, the exported video showed a single word at a time in the
- * middle of the frame - while the on-screen preview showed a line of up to four
- * words with the spoken one highlighted. It also ignored the selected style and
- * every user override (colour, stroke, shadow, background, alignment,
- * capitalisation, line breaks), used a hard-coded {@code textSizeSp * 2.5f} for
- * the font size, and anchored on the text centre where the preview anchors on the
- * baseline. In short: the burn-in did not resemble the preview.
- *
- * <h3>How the two are kept in sync now</h3>
+ * <h3>Keeping the burn-in and the preview identical</h3>
  * <ul>
  *   <li><b>Line composition and timing</b> come from {@link CaptionLayout}, the
- *       exact same class {@code CaptionOverlayView} uses, so which words share a
+ *       same class {@code CaptionOverlayView} draws from, so which words share a
  *       line and when each line is on screen cannot diverge.</li>
- *   <li><b>Font size</b> is derived from the preview's real pixel text size and
- *       the preview's real view height ({@code previewTextSizePx *
- *       videoHeight / previewOverlayHeightPx}) instead of a magic constant, so
- *       the caption occupies the same fraction of the frame height as it does of
- *       the screen.</li>
- *   <li><b>Vertical anchor</b> converts the preview's baseline Y to libass's
- *       centre-of-line anchor via {@code previewBaselineToCenterPx}.</li>
+ *   <li><b>Coordinate space.</b> {@code posXFraction}/{@code posYFraction} are
+ *       fractions of the <i>video frame</i> in both places. The preview converts
+ *       them to view pixels through the letterboxed video rect
+ *       ({@code CaptionFrameGeometry}); here they are multiplied straight into
+ *       the video's pixel size. Previously the preview used fractions of the
+ *       <i>screen</i> while this class used fractions of the <i>video</i>, and
+ *       since {@code VideoView} letterboxes the picture inside a
+ *       {@code match_parent} view the two were different places - on a portrait
+ *       phone playing a landscape clip the caption sat in the black bar on
+ *       screen but inside the picture in the export.</li>
+ *   <li><b>Font size</b> is the preview's pixel text size divided by the
+ *       displayed-video-to-video scale ({@code previewTextSizePx * videoHeight /
+ *       previewVideoDisplayHeightPx}), i.e. the caption keeps the same fraction
+ *       of the picture height it had on screen. The old code divided by the
+ *       whole overlay height, which made the burn-in several times too small
+ *       whenever the video was letterboxed.</li>
+ *   <li><b>Vertical anchor</b> converts the preview's baseline anchor to
+ *       libass's centre-of-line anchor via {@code previewBaselineToCenterPx}.</li>
  *   <li><b>Horizontal anchor</b> maps the preview's LEFT/CENTER/RIGHT rules
- *       (0.06W / posX*W / 0.94W) onto {@code \an4} / {@code \an5} / {@code \an6}.</li>
- *   <li><b>Multi-line pages</b> ({@code pageBreakLines}) emit one event per
- *       visible line with the same inter-line offset the preview uses.</li>
+ *       (0.06W / posX*W / 0.94W, all fractions of the video) onto
+ *       {@code \an4} / {@code \an5} / {@code \an6}.</li>
  *   <li><b>Word highlighting</b> uses native ASS karaoke ({@code \k}) with each
- *       word's duration set to "until the next word starts" - the same rule
- *       {@code CaptionLayout.activeWordIndex} uses in the preview.</li>
+ *       word's slot lasting until the next word begins - the same rule
+ *       {@code CaptionLayout.activeWordIndex} uses on screen.</li>
+ * </ul>
+ *
+ * <h3>Effects that need more than one event</h3>
+ * Two of the template treatments cannot be expressed as inline tags on a single
+ * text run, so they are emitted structurally:
+ * <ul>
+ *   <li><b>Glow</b> ({@code Mapping.glowRadius}) becomes an extra event emitted
+ *       immediately BEFORE the text, carrying a thick, blurred,
+ *       fully-transparent-fill outline. libass orders images by Layer and then
+ *       by ReadOrder ({@code ass_render.c:3100-3112}), so an earlier event on
+ *       the same layer composites underneath a later one - no separate layer
+ *       number is needed. This is the only way to get a halo in libass:
+ *       {@code \blur} on the text event is applied to the glyph fill bitmap
+ *       ({@code ass_render.c:2726}), which furs the letters instead of glowing
+ *       behind them.</li>
+ *   <li><b>Gradient</b> ({@code Mapping.gradientStops}) becomes
+ *       {@value #GRADIENT_BANDS} events, each clipped to a horizontal band of
+ *       the line box and carrying an interpolated colour. {\code \clip} takes
+ *       absolute script coordinates (libass converts it with
+ *       {@code x2scr_pos_scaled}, it is not offset by {@code \pos}), and every
+ *       band repeats the same karaoke timings so the word highlight still
+ *       advances inside each band.</li>
  * </ul>
  *
  * <h3>Timeline</h3>
  * Event times are written on the ORIGINAL, untrimmed timeline. That is required,
  * not a bug: {@code VideoExporter} trims with {@code -ss}/{@code -to} as
- * <i>output</i> options, which keeps the decoder's original PTS, so the ass
+ * <i>output</i> options, which preserves the decoder's original PTS, so the ass
  * filter sees untrimmed timestamps. Offsetting the times here would double-apply
  * the trim and desynchronise the captions.
- *
- * <h3>Known, deliberate differences from the preview</h3>
- * See {@link StyleAssMapper#exportNotes(String)}. Canvas-only effects (true
- * gradient fills, BlurMaskFilter glows, Android {@code Camera} 3D transforms,
- * per-frame animation) have no libass equivalent. Per-word <i>geometric</i>
- * treatments are applied to the whole active line rather than to one word at a
- * time, because a single libass line event cannot vary them word by word; the
- * per-word colour highlight <i>is</i> exact, via karaoke.
  */
 public final class AssSubtitleBuilder {
+
+    /** Colour bands a gradient fill is split into. */
+    static final int GRADIENT_BANDS = 10;
 
     /** Everything the builder needs, so the call site cannot forget a metric. */
     public static final class Request {
@@ -82,13 +98,32 @@ public final class AssSubtitleBuilder {
         public boolean bold;
         public boolean italic;
 
-        /** Caption anchor as fractions of the frame, matching the preview. */
+        /**
+         * True when the selected font file is itself a bold (or black) face.
+         * Needed because libass picks a face by family + weight, not by
+         * filename: {@code RobotoMono-Bold.ttf} and {@code RobotoMono-Regular.ttf}
+         * both report the family "Roboto Mono", so without the bold flag
+         * fontconfig is free to hand back the Regular face and the export comes
+         * out in a lighter weight than the preview, which loads the file
+         * directly.
+         */
+        public boolean fontAssetIsBold;
+        /** True when the selected font file is an italic/oblique face. */
+        public boolean fontAssetIsItalic;
+
+        /** Caption anchor as fractions of the video frame, matching the preview. */
         public float posXFraction = 0.5f;
         public float posYFraction = 0.85f;
 
         /** Preview metrics, in device pixels, from CaptionOverlayView. */
         public float previewTextSizePx = 40f;
-        public float previewOverlayHeightPx = 1000f;
+        /**
+         * Height, in preview view pixels, of the rect the video actually
+         * occupies - {@code CaptionOverlayView.getVideoRect().height}, NOT the
+         * overlay's own height. Using the overlay height here was what made the
+         * burned-in caption the wrong size.
+         */
+        public float previewVideoDisplayHeightPx = 1000f;
         public float previewBaselineToCenterPx = -14f;
         public float previewLineHeightPx = 52f;
     }
@@ -103,16 +138,16 @@ public final class AssSubtitleBuilder {
         int W = Math.max(2, r.videoWidth);
         int H = Math.max(2, r.videoHeight);
 
-        // Preview pixels -> PlayRes units. libass rescales PlayRes onto the
-        // actual frame, so expressing everything in PlayRes keeps the caption at
-        // the same fraction of the frame as it is of the screen.
-        float overlayH = r.previewOverlayHeightPx > 1f ? r.previewOverlayHeightPx : 1f;
-        float scale = H / overlayH;
+        // View pixels per video pixel. Both the font size and the baseline
+        // offset are measured in preview view pixels, so dividing by this
+        // converts them into video pixels.
+        float displayH = r.previewVideoDisplayHeightPx > 1f ? r.previewVideoDisplayHeightPx : 1f;
+        float scale = H / displayH;
 
         float fontSize = Math.max(6f, r.previewTextSizePx * scale * m.sizeScale);
         float outline = m.outlineWidth * scale;
         float shadow = m.shadowDepth * scale;
-        float blur = m.blur * scale;
+        float glow = m.glowRadius * scale;
         float lineHeight = Math.max(1f, r.previewLineHeightPx * scale);
 
         // Preview anchors the caption on the text BASELINE; libass \an5 anchors
@@ -142,7 +177,7 @@ public final class AssSubtitleBuilder {
         List<CaptionLayout.Line> lines = CaptionLayout.group(
                 r.words, options.lineBreakMode, CaptionLayout.DEFAULT_WORDS_PER_LINE);
 
-        StringBuilder sb = new StringBuilder(4096);
+        StringBuilder sb = new StringBuilder(8192);
 
         sb.append("[Script Info]\n");
         sb.append("; Generated by Capvid. Times are on the original (untrimmed) timeline.\n");
@@ -168,8 +203,8 @@ public final class AssSubtitleBuilder {
                 bgra(m.secondaryColor),
                 bgra(m.outlineColor),
                 bgra(m.shadowColor),
-                (m.bold || r.bold) ? -1 : 0,
-                (m.italic || r.italic) ? -1 : 0,
+                (m.bold || r.bold || r.fontAssetIsBold) ? -1 : 0,
+                (m.italic || r.italic || r.fontAssetIsItalic) ? -1 : 0,
                 m.borderStyle,
                 outline,
                 shadow,
@@ -201,29 +236,123 @@ public final class AssSubtitleBuilder {
                 boolean isActiveLine = (li == active);
                 float y = baseY + (li - active) * lineHeight;
                 String text = isActiveLine
-                        ? karaokeText(lines.get(li), options, m)
+                        ? karaokeText(lines.get(li), options)
                         : staticText(lines.get(li), options, m);
+                String perLineTags = isActiveLine ? m.activeWordTags : m.contextWordTags;
 
-                sb.append(String.format(Locale.US,
-                        "Dialogue: 0,%s,%s,Capvid,,0,0,0,,{\\an%d\\pos(%.1f,%.1f)%s}%s\n",
-                        formatTime(startMs), formatTime(endMs),
-                        an, baseX, y,
-                        (isActiveLine ? m.activeWordTags : m.contextWordTags),
-                        text));
+                // Halo first. Everything stays on Layer 0 and relies on read
+                // order: libass sorts by (Layer, ReadOrder), so the halo, which
+                // is written first, composites underneath the sharp text.
+                if (glow > 0.01f) {
+                    appendDialogue(sb, 0, startMs, endMs, an, baseX, y,
+                            glowTags(m, glow, outline), plainText(lines.get(li), options));
+                }
+
+                if (m.gradientStops != null && m.gradientStops.length >= 2) {
+                    appendGradientBands(sb, startMs, endMs, an, baseX, y,
+                            fontSize, H, m, perLineTags, text);
+                } else {
+                    appendDialogue(sb, 0, startMs, endMs, an, baseX, y, perLineTags, text);
+                }
             }
         }
 
         return sb.toString();
     }
 
+    // ------------------------------------------------------------------
+    // Event emission
+    // ------------------------------------------------------------------
+
+    private static void appendDialogue(StringBuilder sb, int layer, long startMs, long endMs,
+                                       int an, float x, float y, String extraTags, String text) {
+        sb.append("Dialogue: ").append(layer).append(',')
+                .append(formatTime(startMs)).append(',')
+                .append(formatTime(endMs))
+                .append(",Capvid,,0,0,0,,{\\an").append(an)
+                .append(String.format(Locale.US, "\\pos(%.1f,%.1f)", x, y));
+        if (extraTags != null && !extraTags.isEmpty()) sb.append(extraTags);
+        sb.append('}').append(text).append('\n');
+    }
+
+    /**
+     * The halo: a thick outline in the glow colour, blurred, with the glyph fill
+     * made fully transparent so only the soft edge shows.
+     */
+    private static String glowTags(StyleAssMapper.Mapping m, float glow, float outline) {
+        return "\\1a&HFF&"
+                + "\\3c" + bgr(m.glowColor)
+                + "\\3a&H00&"
+                + String.format(Locale.US, "\\bord%.2f", glow + outline)
+                + String.format(Locale.US, "\\blur%.2f", glow)
+                + "\\shad0";
+    }
+
+    /**
+     * A gradient fill, as {@value #GRADIENT_BANDS} horizontally clipped bands.
+     *
+     * <p>The bands span the line box generously ({@code y +/- fontSize}) because
+     * anything outside the glyphs is invisible anyway, and because the exact
+     * ascent/descent of the resolved face is not known here. Each band repeats
+     * the full karaoke text, so the per-word highlight still advances within
+     * every band; only the "sung" colour changes from band to band.
+     */
+    private static void appendGradientBands(StringBuilder sb, long startMs, long endMs,
+                                            int an, float x, float y, float fontSize, int frameH,
+                                            StyleAssMapper.Mapping m, String extraTags, String text) {
+        int[] stops = m.gradientStops;
+        float top = y - fontSize;
+        float bandH = (2f * fontSize) / GRADIENT_BANDS;
+        for (int b = 0; b < GRADIENT_BANDS; b++) {
+            float y0 = top + b * bandH;
+            float y1 = y0 + bandH + 0.5f;   // +0.5 so neighbouring bands cannot seam
+            int colour = sampleGradient(stops, (b + 0.5f) / GRADIENT_BANDS);
+            String clip = String.format(Locale.US, "\\clip(0,%.1f,%d,%.1f)",
+                    Math.max(0f, y0), frameH, Math.min((float) frameH, y1));
+            String tags = clip + "\\1c" + bgr(colour) + "\\1a&H00&";
+            appendDialogue(sb, 0, startMs, endMs, an, x, y,
+                    extraTags == null || extraTags.isEmpty() ? tags : tags + extraTags, text);
+        }
+    }
+
+    /**
+     * Linear interpolation across equally spaced stops.
+     *
+     * @param t 0 at the first stop, 1 at the last
+     */
+    static int sampleGradient(int[] stops, float t) {
+        if (stops == null || stops.length == 0) return 0xFFFFFFFF;
+        if (stops.length == 1) return stops[0];
+        float clamped = Math.max(0f, Math.min(1f, t));
+        float scaled = clamped * (stops.length - 1);
+        int i = (int) Math.floor(scaled);
+        if (i >= stops.length - 1) return stops[stops.length - 1];
+        float f = scaled - i;
+        int a = stops[i];
+        int b = stops[i + 1];
+        int alpha = mix((a >> 24) & 0xFF, (b >> 24) & 0xFF, f);
+        int red = mix((a >> 16) & 0xFF, (b >> 16) & 0xFF, f);
+        int green = mix((a >> 8) & 0xFF, (b >> 8) & 0xFF, f);
+        int blue = mix(a & 0xFF, b & 0xFF, f);
+        return (alpha << 24) | (red << 16) | (green << 8) | blue;
+    }
+
+    private static int mix(int from, int to, float f) {
+        return Math.max(0, Math.min(255, Math.round(from + (to - from) * f)));
+    }
+
+    // ------------------------------------------------------------------
+    // Text
+    // ------------------------------------------------------------------
+
     /**
      * The active line: each word carries a {@code \k} karaoke slot lasting until
      * the NEXT word begins, which is the same rule the preview uses to decide
-     * which word is highlighted. libass paints a word in SecondaryColour before
-     * its slot and PrimaryColour after, so the highlight advances word by word.
+     * which word is highlighted. libass paints a word in SecondaryColour to the
+     * right of the karaoke break and PrimaryColour to the left of it
+     * ({@code ass_render.c:387-406}), so the highlight advances word by word.
      */
-    private static String karaokeText(CaptionLayout.Line line, CaptionStyleOptions options,
-                                      StyleAssMapper.Mapping m) {
+    private static String karaokeText(CaptionLayout.Line line, CaptionStyleOptions options) {
         StringBuilder sb = new StringBuilder();
         List<CaptionWord> ws = line.words;
         for (int i = 0; i < ws.size(); i++) {
@@ -249,6 +378,13 @@ public final class AssSubtitleBuilder {
         StringBuilder sb = new StringBuilder();
         sb.append("{\\1c").append(bgr(m.secondaryColor))
                 .append("\\1a").append(alphaTag(m.secondaryColor)).append('}');
+        sb.append(plainText(line, options));
+        return sb.toString();
+    }
+
+    /** The line's words with no karaoke and no colour override. */
+    private static String plainText(CaptionLayout.Line line, CaptionStyleOptions options) {
+        StringBuilder sb = new StringBuilder();
         List<CaptionWord> ws = line.words;
         for (int i = 0; i < ws.size(); i++) {
             if (i > 0) sb.append(' ');

@@ -42,7 +42,6 @@ public final class StyleAssMapper {
         public int shadowColor = Color.argb(128, 0, 0, 0);
         public float outlineWidth = 2f;
         public float shadowDepth = 0f;
-        public float blur = 0f;
         /** ASS BorderStyle: 1 = outline+shadow, 3 = opaque box behind text. */
         public int borderStyle = 1;
         public boolean italic = false;
@@ -53,6 +52,28 @@ public final class StyleAssMapper {
         public String contextWordTags = "";
         /** Multiplier applied to the base font size (e.g. 0.85 for small-caps looks). */
         public float sizeScale = 1f;
+
+        /**
+         * Radius of a soft halo drawn BEHIND the text, in preview pixels, or 0
+         * for none. Rendered as a second, lower-layer event with a thick
+         * outline and \blur, which is how a glow has to be done in ASS:
+         * putting \blur on the text event blurs the glyphs themselves. Verified
+         * against libass ass_render.c:2726, where ass_synth_blur() is applied
+         * to the fill bitmap.
+         */
+        public float glowRadius = 0f;
+        /** Colour of that halo. */
+        public int glowColor = Color.WHITE;
+
+        /**
+         * Two or more ARGB colours for a gradient fill, first = top (or left),
+         * last = bottom (or right); null for a flat fill. libass has no gradient
+         * primitive, so AssSubtitleBuilder renders this as a stack of clipped
+         * colour bands, each carrying the same karaoke timings.
+         */
+        public int[] gradientStops = null;
+        /** True = top-to-bottom gradient, false = left-to-right. */
+        public boolean gradientVertical = true;
     }
 
     private StyleAssMapper() {
@@ -85,28 +106,33 @@ public final class StyleAssMapper {
                 break;
 
             case BOX_TRANSLUCENT:
+                // BorderStyle 3 with Shadow 0 draws the box in OutlineColour
+                // (libass ass_render.c:2737 only moves the box onto the shadow
+                // layer, drawn in BackColour, when a shadow offset is set), so
+                // the translucency has to live in the outline colour's alpha.
                 m.borderStyle = 3;
-                m.outlineColor = withAlpha(sw[0], 190);
+                m.outlineColor = withAlpha(sw[0], 110);
                 m.primaryColor = sw[1];
                 m.secondaryColor = withAlpha(sw[1], 190);
                 m.outlineWidth = 8f;
-                m.blur = 1f;
                 break;
 
             case OUTLINE_GLOW:
                 m.outlineColor = sw[3];
                 m.outlineWidth = 3f;
-                m.blur = 4f;
                 m.primaryColor = sw[0];
                 m.secondaryColor = withAlpha(sw[0], 190);
+                // Halo behind the glyphs, not blur on them.
+                m.glowRadius = 6f;
+                m.glowColor = sw[0];
                 break;
 
             case GRADIENT_FILL:
-                // ASS has no gradient fill: burn the middle stop as a solid colour.
                 m.primaryColor = sw[1];
                 m.secondaryColor = withAlpha(sw[1], 190);
                 m.outlineColor = sw[3];
                 m.outlineWidth = 2f;
+                m.gradientStops = new int[]{sw[0], sw[1], sw[2]};
                 break;
 
             case SPLIT_HALF:
@@ -131,6 +157,8 @@ public final class StyleAssMapper {
                 m.secondaryColor = withAlpha(sw[0], 190);
                 m.outlineColor = sw[3];
                 m.outlineWidth = 2.5f;
+                // Light -> mid -> dark reads as brushed metal.
+                m.gradientStops = new int[]{sw[2], sw[0], sw[3]};
                 break;
 
             case COMIC_OUTLINE:
@@ -163,6 +191,22 @@ public final class StyleAssMapper {
             String context = ModernStyleAssWriter.innerTagsFor(styleId, sw, false);
             if (!active.isEmpty()) m.activeWordTags = join(m.activeWordTags, active);
             if (!context.isEmpty()) m.contextWordTags = join(m.contextWordTags, context);
+
+            // The effects that cannot be expressed as inline tags are declared
+            // here instead, so the writer does not fake them with \blur on the
+            // text (which blurs the glyphs rather than glowing behind them).
+            if ("NEON_OUTLINE_GLOW".equals(styleId)) {
+                m.glowRadius = 7f;
+                m.glowColor = sw[0];
+            } else if ("LIQUID_GRADIENT_SWEEP".equals(styleId)) {
+                m.gradientStops = new int[]{sw[0], sw[1], sw[2]};
+            } else if ("CHROME_METALLIC".equals(styleId)) {
+                m.gradientStops = new int[]{sw[2], sw[0], sw[3]};
+            } else if ("GLASSMORPHISM_CARD".equals(styleId)) {
+                m.borderStyle = 3;
+                m.outlineColor = withAlpha(sw[0], 110);
+                m.outlineWidth = 8f;
+            }
         }
 
         // ---- user overrides win over the template ------------------------
@@ -201,13 +245,9 @@ public final class StyleAssMapper {
         if (def == null) return "";
         switch (def.treatment) {
             case GRADIENT_FILL:
-                return "Gradient fill is burned in as a solid colour (libass has no gradient).";
+                return "Gradient burned in as 8 clipped colour bands.";
             case CHROME:
-                return "Metallic gradient is burned in as a solid colour (libass has no gradient).";
-            case OUTLINE_GLOW:
-                return "Glow is approximated with libass blur.";
-            case BOX_TRANSLUCENT:
-                return "Frosted panel is approximated with a translucent outline.";
+                return "Metallic gradient burned in as 8 clipped colour bands.";
             default:
                 break;
         }
@@ -218,12 +258,12 @@ public final class StyleAssMapper {
             case "DEPTH_STACK_3D":
                 return "3D transform has no libass equivalent; burned in flat.";
             case "BLUR_TO_FOCUS":
-                return "Blur-in animation is burned in as plain text.";
+                return "Blur-in animated with a \\blur transform.";
             case "GLITCH_FLICKER":
             case "RAINBOW_CYCLE":
             case "WAVY_BASELINE":
             case "SHAKE_WIGGLE_EMPHASIS":
-                return "Per-frame animation is burned in as a static treatment.";
+                return "Animation approximated with ASS \\t transforms.";
             default:
                 return "";
         }

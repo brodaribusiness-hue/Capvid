@@ -64,6 +64,12 @@ public class PreviewActivity extends AppCompatActivity {
 
     private long trimStartMs = 0;
     private long trimEndMs = -1; // -1 until video duration is known (set in onPrepared)
+    /**
+     * Preview zoom only. It scales the VideoView and the caption overlay
+     * together, so the caption keeps the same size relative to the picture at
+     * any zoom, and VideoExporter no longer applies it to the encoded frame -
+     * exporting at 50% used to produce a 540p file from a 1080p source.
+     */
     private float scaleFactor = 1f;
 
     private ProjectManager projectManager;
@@ -135,7 +141,7 @@ public class PreviewActivity extends AppCompatActivity {
 
         scaleSlider.addOnChangeListener((slider, value, fromUser) -> {
             scaleFactor = value / 100f;
-            scaleLabel.setText("Scale: " + (int) value + "%");
+            scaleLabel.setText("Preview zoom: " + (int) value + "%");
             applyScalePreview();
             if (fromUser) saveProjectState();
         });
@@ -219,12 +225,13 @@ public class PreviewActivity extends AppCompatActivity {
             trimRangeSlider.setValueTo(Math.max(1f, (float) mp.getDuration()));
             trimRangeSlider.setValues((float) trimStartMs, (float) trimEndMs);
             trimRangeLabel.setText("Trim: " + formatMs(trimStartMs) + " - " + formatMs(trimEndMs));
-            scaleLabel.setText("Scale: " + (int) (scaleFactor * 100) + "%");
+            scaleLabel.setText("Preview zoom: " + (int) (scaleFactor * 100) + "%");
             scaleSlider.setValue(scaleFactor * 100f);
             applyScalePreview();
             if (trimStartMs > 0) videoView.seekTo((int) trimStartMs);
             videoView.start();
             startCaptionSyncLoop();
+            publishVideoDisplaySize();
         });
 
         exportButton.setOnClickListener(v -> {
@@ -599,7 +606,11 @@ public class PreviewActivity extends AppCompatActivity {
         final float posX = captionOverlay.getPosXFraction();
         final float posY = captionOverlay.getPosYFraction();
         final float textSizePx = captionOverlay.getTextSizePx();
-        final float overlayHeightPx = Math.max(1f, captionOverlay.getHeight());
+        // The height of the rect the VIDEO occupies, not of the overlay. The
+        // overlay is match_parent while VideoView letterboxes the picture inside
+        // it, and dividing by the overlay height is what made the burned-in
+        // caption the wrong size.
+        final float videoDisplayHeightPx = Math.max(1f, captionOverlay.getVideoRect().height);
         final float baselineToCenterPx = captionOverlay.getBaselineToCenterPx();
         final float lineHeightPx = captionOverlay.getLineHeightPx();
         final boolean boldSnapshot = captionOverlay.getBold();
@@ -611,7 +622,6 @@ public class PreviewActivity extends AppCompatActivity {
         final List<CaptionWord> wordsSnapshot = new ArrayList<>(captionWords);
         final long trimStart = trimStartMs;
         final long trimEnd = trimEndMs;
-        final float scale = scaleFactor;
         final long duration = videoDurationMs;
 
         String fidelityNote = com.saad.capvid.export.StyleAssMapper.exportNotes(styleId);
@@ -641,17 +651,23 @@ public class PreviewActivity extends AppCompatActivity {
                 req.assFontFamilyName = assFamily;
                 req.bold = boldSnapshot;
                 req.italic = italicSnapshot;
+                // libass resolves a face by family + weight, not by filename, so
+                // a bold file that shares its family with a regular one has to
+                // ask for bold explicitly or fontconfig may hand back the
+                // lighter face.
+                req.fontAssetIsBold = StyleFontMap.assetIsBold(fontAsset);
+                req.fontAssetIsItalic = StyleFontMap.assetIsItalic(fontAsset);
                 req.posXFraction = posX;
                 req.posYFraction = posY;
                 req.previewTextSizePx = textSizePx;
-                req.previewOverlayHeightPx = overlayHeightPx;
+                req.previewVideoDisplayHeightPx = videoDisplayHeightPx;
                 req.previewBaselineToCenterPx = baselineToCenterPx;
                 req.previewLineHeightPx = lineHeightPx;
 
                 String ass = AssSubtitleBuilder.build(req);
 
                 exporter.export(this, inputRef.getAbsolutePath(), ass, fontsDir,
-                        trimStart, trimEnd, duration, scale,
+                        trimStart, trimEnd, duration,
                         new VideoExporter.ExportCallback() {
                             @Override
                             public void onProgress(int percent) {
@@ -715,26 +731,68 @@ public class PreviewActivity extends AppCompatActivity {
      * shown, and the .ass canvas has to describe that same frame - so a portrait
      * phone video stored as rotated landscape must be reported swapped.
      */
+    /**
+     * Reads the display dimensions straight from the content URI, without the
+     * cache copy {@link #readDisplayDimensions(File)} needs. The overlay has to
+     * know these to work out where {@code VideoView} letterboxes the picture,
+     * because the caption is positioned as a fraction of the video frame while
+     * the overlay covers the whole screen.
+     *
+     * <p>Fails soft: if the metadata cannot be read the overlay keeps using the
+     * full view, which is the old behaviour.
+     */
+    private void publishVideoDisplaySize() {
+        final Uri uri = videoUri;
+        executor.execute(() -> {
+            int[] dims = null;
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            try {
+                retriever.setDataSource(PreviewActivity.this, uri);
+                dims = displayDimensionsFrom(retriever);
+            } catch (Throwable ignored) {
+                // leave dims null; the overlay falls back to the whole view
+            } finally {
+                try {
+                    retriever.release();
+                } catch (Throwable ignored) {
+                }
+            }
+            final int[] result = dims;
+            if (result == null) return;
+            mainHandler.post(() -> captionOverlay.setVideoDisplaySize(result[0], result[1]));
+        });
+    }
+
     private int[] readDisplayDimensions(File videoFile) throws Exception {
         MediaMetadataRetriever retriever = new MediaMetadataRetriever();
         try {
             retriever.setDataSource(videoFile.getAbsolutePath());
-            String w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
-            String h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
-            if (w == null || h == null) throw new IllegalStateException("Could not read the video dimensions");
-            int videoWidth = Integer.parseInt(w);
-            int videoHeight = Integer.parseInt(h);
-            String rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
-            int rotation = rotationStr != null ? Integer.parseInt(rotationStr) : 0;
-            if (rotation == 90 || rotation == 270) {
-                int tmp = videoWidth;
-                videoWidth = videoHeight;
-                videoHeight = tmp;
-            }
-            return new int[]{videoWidth, videoHeight};
+            int[] dims = displayDimensionsFrom(retriever);
+            if (dims == null) throw new IllegalStateException("Could not read the video dimensions");
+            return dims;
         } finally {
             retriever.release();
         }
+    }
+
+    /**
+     * Width/height as the viewer will see them, i.e. with 90/270 rotation
+     * metadata applied. Returns null when the metadata is missing.
+     */
+    private static int[] displayDimensionsFrom(MediaMetadataRetriever retriever) {
+        String w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+        String h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+        if (w == null || h == null) return null;
+        int videoWidth = Integer.parseInt(w);
+        int videoHeight = Integer.parseInt(h);
+        String rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+        int rotation = rotationStr != null ? Integer.parseInt(rotationStr) : 0;
+        if (rotation == 90 || rotation == 270) {
+            int tmp = videoWidth;
+            videoWidth = videoHeight;
+            videoHeight = tmp;
+        }
+        return new int[]{videoWidth, videoHeight};
     }
 
     /**

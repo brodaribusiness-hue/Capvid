@@ -75,6 +75,42 @@ public class StyleFontMap {
     private static final String DEFAULT_ASSET = "All-Genders-Regular-v4.otf";
 
     /**
+     * Bundled files whose face is a bold or black weight.
+     *
+     * <p>This matters at export time, not at preview time. The preview calls
+     * {@code Typeface.createFromAsset} on the file, so it always gets exactly
+     * the face named. libass is given a <i>family name</i> instead and asks
+     * fontconfig to pick a face, and fontconfig picks by family + weight. Two of
+     * the bundled files - {@code RobotoMono-Bold.ttf} and
+     * {@code RobotoMono-Regular.ttf} - both report the family "Roboto Mono", so
+     * with the .ass Style's Bold flag clear fontconfig is free to return the
+     * Regular face and the burned-in caption comes out visibly lighter than the
+     * preview showed.
+     */
+    private static final Map<String, Boolean> BOLD_ASSETS = new HashMap<>();
+
+    static {
+        BOLD_ASSETS.put("RobotoMono-Bold.ttf", Boolean.TRUE);
+        // "Jost Black" is its own family with a single face, so fontconfig finds
+        // it either way; declaring the weight keeps the request honest.
+        BOLD_ASSETS.put("Jost-Black.ttf", Boolean.TRUE);
+    }
+
+    /** True if the bundled file is a bold/black face. */
+    public static boolean assetIsBold(String assetFileName) {
+        return assetFileName != null && Boolean.TRUE.equals(BOLD_ASSETS.get(assetFileName));
+    }
+
+    /**
+     * True if the bundled file is an italic or oblique face. None of the current
+     * set is, but the exporter needs the question answered rather than assumed,
+     * because the same family/weight reasoning applies.
+     */
+    public static boolean assetIsItalic(String assetFileName) {
+        return false;
+    }
+
+    /**
      * @return the font to use for {@code style}, taken from that style's
      *         CaptionStyleDefinition.fontAsset.
      */

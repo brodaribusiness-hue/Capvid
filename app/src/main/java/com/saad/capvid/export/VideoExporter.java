@@ -84,12 +84,11 @@ public class VideoExporter {
      * @param trimStartMs       in-point on the original timeline
      * @param trimEndMs         out-point on the original timeline; &lt;= trimStartMs means no trim
      * @param videoDurationMs   total duration, used only for the progress percentage
-     * @param scaleFactor       1.0 = keep original size
      * @param callback          progress/result callbacks
      */
     public void export(Context context, String inputVideoPath, String assContent, File fontsDir,
                        long trimStartMs, long trimEndMs, long videoDurationMs,
-                       float scaleFactor, ExportCallback callback) {
+                       ExportCallback callback) {
         final Context appContext = context.getApplicationContext();
         try {
             long usable = freeBytes(appContext.getCacheDir());
@@ -109,7 +108,7 @@ public class VideoExporter {
                     "capvid_export_" + System.currentTimeMillis() + ".mp4");
 
             String command = buildCommand(inputVideoPath, assFile, fontsDir,
-                    trimStartMs, trimEndMs, scaleFactor, tempOutput);
+                    trimStartMs, trimEndMs, tempOutput);
 
             final long duration = videoDurationMs > 0 ? videoDurationMs : 1L;
             final long inPoint = trimStartMs > 0 ? trimStartMs : 0L;
@@ -166,19 +165,25 @@ public class VideoExporter {
         }
     }
 
+    /**
+     * The export always keeps the source resolution.
+     *
+     * <p>It used to multiply the frame size by the preview's "Scale" slider, but
+     * that slider is a <i>preview zoom</i>: {@code applyScalePreview} scales the
+     * {@code VideoView} and the caption overlay together, so the caption keeps
+     * the same size relative to the picture whatever the zoom is. Scaling the
+     * encoded frame therefore threw away detail for no layout benefit - at 50%
+     * a 1080p source exported as 540p, which is the single most visible quality
+     * loss in the whole pipeline. The scale filter is still applied, but only to
+     * force even dimensions, which libx264 with yuv420p requires.
+     */
     static String buildCommand(String inputVideoPath, File assFile, File fontsDir,
-                               long trimStartMs, long trimEndMs, float scaleFactor, File output) {
+                               long trimStartMs, long trimEndMs, File output) {
         boolean hasTrim = trimEndMs > trimStartMs && trimStartMs >= 0
                 && !(trimStartMs == 0 && trimEndMs <= 0);
 
         // Even output dimensions are mandatory for libx264 with yuv420p.
-        String scale;
-        if (Math.abs(scaleFactor - 1f) > 0.01f) {
-            scale = String.format(Locale.US, "scale=trunc(iw*%.4f/2)*2:trunc(ih*%.4f/2)*2",
-                    scaleFactor, scaleFactor);
-        } else {
-            scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
-        }
+        String scale = "scale=trunc(iw/2)*2:trunc(ih/2)*2";
 
         String vf = scale
                 + ",ass='" + assFile.getAbsolutePath() + "'"
@@ -197,7 +202,11 @@ public class VideoExporter {
 
         cmd.append("-map 0:v:0 -map 0:a:0? ")
                 .append("-vf \"").append(vf).append("\" ")
-                .append("-c:v libx264 -preset medium -crf 20 ")
+                // CRF 18 is visually transparent for talking-head and screen
+                // content at roughly 25% more bits than the previous 20. The
+                // preset stays at medium on purpose: on a phone, slow is 2-3x
+                // the encode time for a few percent of bitrate at equal quality.
+                .append("-c:v libx264 -preset medium -crf 18 ")
                 // Audio is re-encoded only when we had to re-time the stream; a
                 // straight copy preserves the original quality otherwise.
                 .append(hasTrim ? "-c:a aac -b:a 192k " : "-c:a copy ")

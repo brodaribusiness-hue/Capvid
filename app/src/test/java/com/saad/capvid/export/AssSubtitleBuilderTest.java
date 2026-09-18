@@ -46,7 +46,7 @@ public class AssSubtitleBuilderTest {
         r.options.pageBreakLines = 1;
         r.assFontFamilyName = "All Genders v4";
         r.previewTextSizePx = 40f;
-        r.previewOverlayHeightPx = 1000f;
+        r.previewVideoDisplayHeightPx = 1000f;
         r.previewBaselineToCenterPx = -14f;
         r.previewLineHeightPx = 52f;
         return r;
@@ -229,6 +229,102 @@ public class AssSubtitleBuilderTest {
         AssSubtitleBuilder.Request r = req();
         r.options.capitalization = CaptionStyleOptions.Capitalization.UPPERCASE;
         assertTrue(firstDialogue(AssSubtitleBuilder.build(r)).contains("HELLO"));
+    }
+
+
+    // ---- glow: a halo behind the text, not blur on the text ------------
+
+    @Test
+    public void glowIsAHaloEmittedBeforeTheSharpTextNotABlurOnTheGlyphs() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "GLOW_POP";
+        List<String> d = dialogues(AssSubtitleBuilder.build(r));
+
+        // pageBreakLines is 1, so every active line yields a halo + text pair.
+        assertEquals(6, d.size());
+        for (int i = 0; i < d.size(); i += 2) {
+            String halo = d.get(i);
+            String text = d.get(i + 1);
+            // The halo is a thick, blurred outline whose FILL is fully
+            // transparent, so only the soft edge shows.
+            assertTrue("halo must blur: " + halo, halo.contains("\\blur"));
+            assertTrue("halo must hide the fill: " + halo, halo.contains("\\1a&HFF&"));
+            assertFalse("the sharp text must not be blurred: " + text,
+                    text.contains("\\blur"));
+            assertFalse("the sharp text must keep its fill: " + text,
+                    text.contains("\\1a&HFF&"));
+        }
+    }
+
+    @Test
+    public void plainStylesEmitNoHalo() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "MINIMAL_FADE";
+        List<String> d = dialogues(AssSubtitleBuilder.build(r));
+        assertEquals(3, d.size());
+        for (String line : d) {
+            assertFalse("MINIMAL_FADE should not glow: " + line, line.contains("\\blur"));
+        }
+    }
+
+    // ---- gradient: clipped colour bands -------------------------------
+
+    @Test
+    public void gradientStylesEmitOneClippedEventPerBand() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "GRADIENT_TEXT";
+        List<String> d = dialogues(AssSubtitleBuilder.build(r));
+        assertFalse(d.isEmpty());
+        for (String line : d) {
+            assertTrue("every gradient event must be clipped: " + line,
+                    line.contains("\\clip("));
+            assertTrue("every gradient event must set its own fill: " + line,
+                    line.contains("\\1c&H"));
+        }
+        // pageBreakLines is 1, so each active line yields exactly one band stack
+        assertEquals(AssSubtitleBuilder.GRADIENT_BANDS, d.size() / 3);
+    }
+
+    @Test
+    public void gradientBandsStillCarryTheKaraokeTimings() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "GRADIENT_TEXT";
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            assertTrue("each band must repeat the karaoke slots: " + line,
+                    line.contains("{\\k"));
+        }
+    }
+
+    @Test
+    public void gradientInterpolationReachesBothEndStops() {
+        int[] stops = {0xFF000000, 0xFFFFFFFF};
+        assertEquals(0xFF000000, AssSubtitleBuilder.sampleGradient(stops, 0f));
+        assertEquals(0xFFFFFFFF, AssSubtitleBuilder.sampleGradient(stops, 1f));
+        // midpoint of black and white is mid grey in every channel
+        int mid = AssSubtitleBuilder.sampleGradient(stops, 0.5f);
+        assertEquals(128, (mid >> 16) & 0xFF);
+        assertEquals(128, (mid >> 8) & 0xFF);
+        assertEquals(128, mid & 0xFF);
+        // out of range is clamped, not extrapolated
+        assertEquals(0xFF000000, AssSubtitleBuilder.sampleGradient(stops, -2f));
+        assertEquals(0xFFFFFFFF, AssSubtitleBuilder.sampleGradient(stops, 9f));
+    }
+
+    // ---- font weight ---------------------------------------------------
+
+    @Test
+    public void boldFontAssetSetsTheStyleBoldFlag() {
+        AssSubtitleBuilder.Request plain = req();
+        plain.fontAssetIsBold = false;
+        String[] withoutBold = styleLine(AssSubtitleBuilder.build(plain)).split(",");
+
+        AssSubtitleBuilder.Request boldReq = req();
+        boldReq.fontAssetIsBold = true;
+        String[] withBold = styleLine(AssSubtitleBuilder.build(boldReq)).split(",");
+
+        // Field 8 of the V4+ Style line is Bold: 0 off, -1 on.
+        assertEquals("0", withoutBold[7].trim());
+        assertEquals("-1", withBold[7].trim());
     }
 
     // ---- helpers -------------------------------------------------------
