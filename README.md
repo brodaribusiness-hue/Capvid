@@ -30,6 +30,12 @@ before building; without it the native build fails.
 Requirements: JDK 17, Android SDK 34, NDK `26.1.10909125`, CMake `3.22.1`.
 The Gradle wrapper (8.5) is committed, so no separate Gradle install is needed.
 
+CI runs the whole thing on every push and pull request — see
+[`.github/workflows/android-ci.yml`](.github/workflows/android-ci.yml). The last
+green run compiled the native bridge for both ABIs and executed 30 unit tests.
+It also posts the executed test names to the pull request, so "the tests passed"
+is checkable rather than asserted.
+
 ### Contract checks
 
 ```bash

@@ -44,10 +44,39 @@ from Google, no AGP, no NDK, no CMake. `apt` is unusable (no writable
 5. Hand-traced every unit-test expectation against the implementation. (This
    found one wrong expectation of mine, now corrected — see §12.)
 
-**UNVERIFIED — must be run by the developer:** the Gradle build itself, the NDK
-compile of the native bridge, the unit tests, and every on-device behaviour
-(playback, export, Gallery save). The CI workflow is set up to run all of these;
-`./gradlew testDebugUnitTest assembleDebug assembleRelease` is the command.
+**UNVERIFIED — must be run by the developer:** on-device behaviour (playback,
+export, Gallery save, model download). Everything else has now been executed —
+see the next subsection.
+
+### 0A. What CI subsequently proved
+
+The sandbox could not build, so the build was run where it could: on GitHub
+Actions, from pull request
+[`#1`](https://github.com/brodaribusiness-hue/Capvid/pull/1). This is not a
+claim about code that exists; it is output from a real toolchain.
+
+Run **35295977165** — every step `success`:
+
+| Step | Result |
+|---|---|
+| Checkout with pinned submodules | success — `whisper/include/whisper.h` present at `927cfce3…` |
+| Static contract audit | success — 0 errors, 0 warnings |
+| Gradle wrapper validation | success — jar hash accepted by `gradle/actions/wrapper-validation@v4` |
+| `testDebugUnitTest` | success — **30 tests, 0 failures, 0 errors, 0 skipped** |
+| `lintDebug` | success |
+| `assembleDebug` (compiles the native whisper.cpp bridge with NDK 26.1.10909125 / CMake 3.22.1 for `arm64-v8a` + `armeabi-v7a`) | success — APK 27,607,385 bytes |
+| `assembleRelease` | success |
+| ABI assertion (`libcapvid_native.so` in both ABIs) | success |
+
+Two real defects were found only by doing this — CAP-029 (the `gradlew` stub,
+which had made every build fail before Gradle even started) and CAP-030 (a
+`double`→`long` conversion in `VideoExporter`). Neither was visible to source
+reading. That is the argument for running the build rather than reasoning about
+it, and it is why the CI reporting now posts the executed test names to the pull
+request instead of leaving a count to be quoted from memory.
+
+Getting there took five CI runs, because the workflow itself had to be fixed
+first — see §2A.
 
 ---
 
@@ -359,6 +388,36 @@ was reported unresolved.
 
 ---
 
+## 2A. Fixing the CI workflow itself
+
+The first four CI runs failed for reasons that were about the workflow, not the
+app. Each one is worth recording because each would otherwise have produced a
+false verdict.
+
+1. **A `tee` was hiding every build failure.** The steps were written
+   `./gradlew … | tee /tmp/x.log`. A pipeline's status is its last command's, so
+   the step reported `tee`'s exit status — always 0 — and run 35293747437 showed
+   *unit tests, lint, assembleDebug and assembleRelease all green* when in fact
+   the wrapper (CAP-029) had failed immediately. The job now runs under
+   `bash -eo pipefail`. **Any "CI is green" claim from that run was worthless.**
+2. **`pipefail` then broke the SDK step.** `yes | sdkmanager …` exits 141 because
+   `yes` is killed by SIGPIPE once sdkmanager closes the pipe. Those two steps
+   opt out of `pipefail`, where the pipeline's meaningful status is
+   sdkmanager's.
+3. **sdkmanager's exit status is not trustworthy.** It printed
+   `Install NDK (Side by side) 26.1.10909125 … finished.`, wrote 2 GB to disk,
+   and still returned 1 — and also returned 1 for `platform-tools` when it was
+   already installed. The step now asserts the five required SDK directories
+   exist instead of reading an exit code.
+4. **Failures were unreadable from this network.** The runner log archive is
+   served from `results-receiver.actions.githubusercontent.com` (`000` here),
+   artefacts from `pipelines.actions.githubusercontent.com` (`000`), and the step
+   summary is not exposed through the check-runs API. `api.github.com` *is*
+   reachable, so CI now posts captured logs — and, on every run, the executed
+   test names — as pull request comments.
+
+---
+
 ## 3. Font audit
 
 Real `name`-table data read out of the bundled binaries with `fontTools`:
@@ -417,7 +476,7 @@ marked otherwise.
 | ID | Sev | Category | Location | Problem → root cause → effect | Fix | Verification |
 |---|---|---|---|---|---|---|
 | CAP-001 | BLOCKER | BUILD | `cpp/CMakeLists.txt`, `android-ci.yml` | `add_subdirectory(whisper)` with no `cpp/whisper` in the repo; CI cloned unpinned `main` → repo not self-contained, build not reproducible | pinned git submodule at v1.9.4 `927cfce3…`; CI `submodules: recursive` + hard fail if absent | `git ls-files -s`; audit §10 |
-| CAP-002 | BLOCKER | BUILD | repo root, `android-ci.yml` | no Gradle wrapper; CI installed a floating Gradle 8.5 | committed Gradle 8.5 wrapper (jar sha256 `d3b261c2…`), CI uses `./gradlew` + `wrapper-validation` | `sha256sum gradle/wrapper/gradle-wrapper.jar` |
+| CAP-002 | BLOCKER | BUILD | repo root, `android-ci.yml` | no Gradle wrapper; CI installed a floating Gradle 8.5 | committed Gradle 8.5 wrapper (jar sha256 `d3b261c2…`), CI uses `./gradlew` + `wrapper-validation`. **Incomplete as first written — the jar was authentic but the `gradlew` script beside it was not; see CAP-029** | `sha256sum`; `gradle/actions/wrapper-validation@v4` |
 | CAP-003 | BLOCKER | EXPORT/CAPTION | `AssSubtitleBuilder.build` | `x`/`y` computed outside the loop; one `Dialogue` per word all at the same `\pos` → export showed one word at a time vs preview's word line | rebuilt on shared `CaptionLayout`; one event per line with karaoke | `AssSubtitleBuilderTest` (6 assertions on event count/windows) |
 | CAP-004 | BLOCKER | CAPTION | `AssSubtitleBuilder`, `PreviewActivity.runExport` | style + all `CaptionStyleOptions` ignored at export; `ModernStyleAssWriter` never called | new `StyleAssMapper` covering all 60 styles; `ModernStyleAssWriter` wired in | audit §3; `AssSubtitleBuilderTest` |
 | CAP-005 | CRITICAL | CAPTION/FONT | `StyleFontMap` static block | 2 ASS family names did not match the fonts' real `name` tables → libass silently substituted in export | exact family names; auditor re-checks every run against the binaries | `fontTools` table, audit §5: 0 mismatches |
@@ -444,8 +503,15 @@ marked otherwise.
 | CAP-026 | LOW | UI | `activity_preview.xml` and others | hard-coded user-facing strings | not fixed — tracked, see §14 | — |
 | CAP-027 | LOW | RELEASE | `README.md` | one line, no build/privacy/licence information | rewritten; `THIRD_PARTY_NOTICES.md` added | file diff |
 | CAP-028 | LOW | SECURITY | `AndroidManifest.xml` | `INTERNET` permission retained | retained deliberately and documented: model acquisition only | §11 |
+| CAP-029 | BLOCKER | BUILD | `gradlew`, `gradlew.bat` | `gradlew` was a 1677-byte hand-written stub, not the script Gradle 8.5 generates. It ran `exec "$JAVACMD" $DEFAULT_JVM_OPTS -jar "$APP_HOME/wrapper/gradle-wrapper.jar" "$@"` — `$DEFAULT_JVM_OPTS` is `'\"-Xmx64m\" \"-Xms64m\"'` and is expanded without `eval`, so the embedded quotes survive word splitting and java is handed the literal string `"-Xmx64m"` as its main class; and the jar lives at `gradle/wrapper/`, not `wrapper/`. **Every build failed before Gradle started.** Found only because CI ran. | replaced both scripts with the authentic ones from `gradle/gradle` at tag `v8.5.0`; `gradle-wrapper.properties` deliberately left pointing at `gradle-8.5-bin.zip` (the v8.5.0 copy points at `gradle-8.5-rc-4`) | ran each script against a stub `java` on `JAVA_HOME`: old → `arg[1]=["-Xmx64m"]`, `.../wrapper/gradle-wrapper.jar`; new → `-Xmx64m`, `-classpath .../gradle/wrapper/gradle-wrapper.jar`, `org.gradle.wrapper.GradleWrapperMain`. CI run 35295532081 green |
+| CAP-030 | HIGH | EXPORT | `VideoExporter.export`, progress callback | `long t = statistics.getTime();` — FFmpegKit's `Statistics.getTime()` returns `double`, so `compileDebugJavaWithJavac` failed with *possible lossy conversion from double to long*. A hand-trace of the source cannot catch this; only a compiler can. | `Math.round(statistics.getTime())`, comment corrected | CI run 35295532081: `compileDebugJavaWithJavac` 1 error → 0 |
 
-**Counts by severity:** BLOCKER 4 · CRITICAL 6 · HIGH 7 · MEDIUM 8 · LOW 3 = **28 total, 27 fixed, 1 tracked** (CAP-026, i18n).
+**Counts by severity:** BLOCKER 5 · CRITICAL 6 · HIGH 8 · MEDIUM 8 · LOW 3 = **30 total, 29 fixed, 1 tracked** (CAP-026, i18n).
+
+CAP-029 and CAP-030 were **not** found by reading the code — both were found by
+running the build. CAP-029 in particular invalidates the CAP-002 entry as it was
+first written: verifying the wrapper *jar*'s hash said nothing about the
+`gradlew` *script* that launches it.
 
 ---
 
@@ -468,18 +534,26 @@ as WORKING — those are marked **CODE-COMPLETE (unverified)** and listed in §1
 - structural balance, 34 files — auditor
 - Gradle wrapper authenticity — sha256 matches Gradle's published value
 
-### CODE-COMPLETE, NOT YET RUN (needs `./gradlew` + a device)
-- Shared layout engine and preview/export geometry agreement
-- Style/colour translation for all 60 templates
-- Model download / import / validation
+### COMPILES AND UNIT-TESTED, NOT YET RUN ON A DEVICE
+All of this is now compiled by CI (`assembleDebug` / `assembleRelease`), so it
+is no longer merely "code that exists". What is still unproven is runtime
+behaviour on hardware.
+- Shared layout engine and preview/export geometry agreement — **30 executed
+  unit tests** cover the layout and ASS output; on-screen agreement still needs
+  eyes on a phone
+- Style/colour translation for all 60 templates — compiled and asserted against
+  the catalog by the auditor; never rendered by libass
+- Model download / import / validation — Hugging Face is unreachable from this
+  sandbox, so the URL is unpinned and no real `.bin` has been fetched
 - Chunked audio extraction
-- Export with progress, cancel, cleanup, Gallery save
+- Export with progress, cancel, cleanup, Gallery save — the FFmpeg command line
+  has never been executed against a real video
 - Camera recording flow
 - Project persistence and resume
 
 ### BROKEN before this change (now fixed)
 See CAP-003, CAP-004, CAP-005, CAP-006, CAP-008, CAP-009, CAP-010, CAP-011,
-CAP-015, CAP-016.
+CAP-015, CAP-016, CAP-029, CAP-030.
 
 ### MISSING (still absent, by design or not yet built)
 - **Chunked transcription for videos over ~20 minutes.** The guard rejects them
@@ -605,16 +679,33 @@ the camera flow are all preserved.
 | Structural balance | audit §0 | **PASS — 34/34 files** |
 | whisper.cpp API at pinned tag | `grep` on the cloned v1.9.4 source | **PASS — 11/11 declared, callback signature exact** |
 | Timestamp units | `whisper.h:670` | **CONFIRMED centiseconds → `×10` correct** |
-| Gradle wrapper integrity | `sha256sum` | **PASS — `d3b261c2…`** |
-| JVM unit tests | `./gradlew testDebugUnitTest` | **NOT RUN — no compiler in this sandbox** |
-| Native build | `./gradlew assembleDebug` | **NOT RUN — no NDK/SDK** |
+| Gradle wrapper integrity | `sha256sum` + `wrapper-validation` | **PASS — `d3b261c2…`** |
+| Gradle wrapper scripts launch java correctly | local probe with a stub `java` | **PASS after CAP-029 — correct args and classpath** |
+| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 30 tests, 0 failed, 0 errored, 0 skipped** |
+| `lintDebug` | CI | **PASS** |
+| Native build (NDK 26.1.10909125 / CMake 3.22.1, both ABIs) | `./gradlew assembleDebug` (CI) | **PASS — APK 27,607,385 bytes; `libcapvid_native.so` in `arm64-v8a` and `armeabi-v7a`** |
+| Release build | `./gradlew assembleRelease` (CI) | **PASS** |
 | On-device critical flow | manual | **NOT RUN — no device** |
 
-The 12 unit tests in `CaptionLayoutTest` and 17 in `AssSubtitleBuilderTest` are
-written and wired into CI. I hand-traced every expectation against the
-implementation; that exercise found one expectation of mine that was wrong
-(`multiLinePagesEmitOneEventPerVisibleLine` expected 5 events where the clamped
-window yields 6) and I corrected it. They have not been executed.
+Evidence is CI run **35295977165** on PR #1, not a local run: this sandbox has no
+JDK compiler, no Android SDK and no NDK, and `services.gradle.org`,
+`dl.google.com` and `maven.google.com` are all unreachable from it.
+
+The breakdown, as reported by `tools/junit_summary.py` from Gradle's JUnit XML:
+
+| test class | tests | failures | errors | skipped |
+|---|---:|---:|---:|---:|
+| `com.saad.capvid.caption.CaptionLayoutTest` | 12 | 0 | 0 | 0 |
+| `com.saad.capvid.export.AssSubtitleBuilderTest` | 18 | 0 | 0 | 0 |
+| **total** | **30** | **0** | **0** | **0** |
+
+This corrects an earlier figure of 29 (12 + 17) that I quoted from a hand count;
+`grep -c '@Test'` on the two sources gives 12 and 18, and CI executed exactly 30.
+
+The hand-tracing done before this was still worth doing — it found one wrong
+expectation of mine (`multiLinePagesEmitOneEventPerVisibleLine` expected 5
+events where the clamped window yields 6) — but it did **not** find CAP-029 or
+CAP-030. Only compiling did.
 
 ---
 
@@ -641,15 +732,32 @@ window yields 6) and I corrected it. They have not been executed.
 
 **READY FOR INTERNAL TESTING — and not beyond it.**
 
+What changed since the first assessment: the build is no longer a hypothesis.
+It compiles, links the native bridge for both ABIs, passes lint, and 30 unit
+tests execute and pass in CI.
+
 Justification, without optimism:
 
-- The two blockers that made the repository unbuildable and non-reproducible are
-  fixed with verifiable evidence (pinned submodule SHA, verified wrapper hash).
+- The repository is now self-contained and reproducible: pinned whisper.cpp
+  submodule SHA, authentic Gradle 8.5 wrapper scripts, and a wrapper jar whose
+  hash matches `gradle/gradle` at `v8.5.0`.
+- `assembleDebug` produces a 27.6 MB APK containing `libcapvid_native.so` for
+  `arm64-v8a` and `armeabi-v7a`, asserted by CI rather than assumed.
 - The defect that broke the product's core promise — exported captions not
-  matching the preview — is fixed architecturally, not cosmetically.
-- The static auditor is green and now gates CI, so the classes of defect it covers
+  matching the preview — is fixed architecturally, not cosmetically, and is
+  covered by 18 executed assertions in `AssSubtitleBuilderTest`.
+- The static auditor is green and gates CI, so the classes of defect it covers
   cannot silently return.
-- **But no build has been compiled and no device has run this code.** A clean
-  `./gradlew assembleDebug` and one real export are the minimum before this is
-  called beta. The font and FFmpeg licence questions are independently blocking
-  for Play submission regardless of test results.
+
+Why it is not beta:
+
+- **No device has run this code.** Unit tests cover layout and ASS generation;
+  they do not cover transcription, playback, the FFmpeg export, or the Gallery
+  save. `VideoExporter`'s command line has never been executed against a real
+  video. One real export on a real phone is the minimum.
+- **The release APK is unsigned.** `assembleRelease` succeeding proves it
+  compiles; there is no keystore configured (`keystore.properties` is optional),
+  so nothing installable has been produced.
+- **Two legal blockers are independent of any test result** — the bundled fonts
+  have no licence files, and `ffmpeg-kit-full-gpl` makes the whole APK GPL. See
+  §8. Neither can be resolved by engineering.
