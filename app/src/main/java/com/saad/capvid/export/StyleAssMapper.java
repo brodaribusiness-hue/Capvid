@@ -209,6 +209,10 @@ public final class StyleAssMapper {
             }
         }
 
+        // ---- entrance / emphasis animation -------------------------------
+        String anim = animationTagsFor(styleId);
+        if (!anim.isEmpty()) m.activeWordTags = join(m.activeWordTags, anim);
+
         // ---- user overrides win over the template ------------------------
         if (o.activeWordColorOn) m.primaryColor = o.activeWordColor;
 
@@ -240,6 +244,59 @@ public final class StyleAssMapper {
      *
      * @return "" when the style exports faithfully
      */
+    /**
+     * Entrance and emphasis animation, as ASS {@code \t} transforms.
+     *
+     * <p>Only tags that libass actually interpolates are used. {@code \t}
+     * re-parses its argument tags with an interpolation factor
+     * ({@code ass_parse.c:670-725}), and a tag honours that factor only if it
+     * mixes its new value with the current one by {@code pwr}. Reading the
+     * parser, those are: {@code \blur}, {@code \1c}-{@code \4c},
+     * {@code \alpha} and {@code \1a}-{@code \4a}, {@code \frx \fry \frz},
+     * {@code \fax \fay}, {@code \fscx \fscy \fs \fsp}, {@code \bord
+     * \xbord \ybord}, {@code \shad \xshad \yshad} and {@code \clip /
+     * \iclip}. {@code \pos} and {@code \move} do NOT interpolate, so nothing
+     * here tries to animate position through {@code \t}.
+     *
+     * <p>Times are relative to the start of the event, which is what
+     * {@code \t(t1,t2,...)} expects.
+     *
+     * @return tags with no surrounding braces, or "" if this style is static
+     */
+    static String animationTagsFor(String styleId) {
+        if (styleId == null) return "";
+        switch (styleId) {
+            case "BLUR_TO_FOCUS":
+                // Start defocused and sharpen over 300ms. \blur interpolates.
+                return "\\blur10\\t(0,300,\\blur0)";
+            case "GLITCH_FLICKER":
+                // Alpha stutter. Chained \t tags each take over from the last.
+                return "\\t(0,60,\\1a&H90&)"
+                        + "\\t(60,120,\\1a&H00&)"
+                        + "\\t(120,170,\\1a&H60&)"
+                        + "\\t(170,240,\\1a&H00&)";
+            case "SHAKE_WIGGLE_EMPHASIS":
+                // Rotate back and forth, settling flat.
+                return "\\frz-4"
+                        + "\\t(0,90,\\frz4)"
+                        + "\\t(90,180,\\frz-2)"
+                        + "\\t(180,270,\\frz0)";
+            case "TILT_PERSPECTIVE_3D":
+                // A static forward tilt: ASS has perspective projection, so a
+                // fixed \frx reads as the caption leaning away from the camera.
+                return "\\frx12";
+            case "ROTATE_IN_3D_FLIP":
+                // Flip in from edge-on. \fry interpolates.
+                return "\\fry90\\t(0,350,\\fry0)";
+            case "CUBE_ROTATE_3D":
+                // A continuous Y rotation is the closest single-transform
+                // equivalent; a real cube needs six faces and depth sorting.
+                return "\\fry-18\\t(0,600,\\fry18)";
+            default:
+                return "";
+        }
+    }
+
     public static String exportNotes(String styleId) {
         CaptionStyleDefinition def = CaptionStyleCatalog.byId(styleId);
         if (def == null) return "";
@@ -258,12 +315,23 @@ public final class StyleAssMapper {
             case "DEPTH_STACK_3D":
                 return "3D transform has no libass equivalent; burned in flat.";
             case "BLUR_TO_FOCUS":
-                return "Blur-in animated with a \\blur transform.";
+                return "Blur-in animated with a \\blur \\t ramp.";
             case "GLITCH_FLICKER":
-            case "RAINBOW_CYCLE":
-            case "WAVY_BASELINE":
             case "SHAKE_WIGGLE_EMPHASIS":
-                return "Animation approximated with ASS \\t transforms.";
+                return "Animated with chained \\t transforms.";
+            case "TILT_PERSPECTIVE_3D":
+                return "Burned in as a static \\frx tilt.";
+            case "ROTATE_IN_3D_FLIP":
+            case "CUBE_ROTATE_3D":
+                return "Animated with a \\fry transform; not a true 3D solid.";
+            case "RAINBOW_CYCLE":
+                return "Colour cycle burned in as a static gradient; animating "
+                        + "\\1c would cancel the per-word karaoke highlight.";
+            case "WAVY_BASELINE":
+                return "Per-word baseline wave burned in flat - it needs "
+                        + "per-word positioning, which one line event cannot do.";
+            case "DEPTH_STACK_3D":
+                return "Stacked depth burned in flat.";
             default:
                 return "";
         }

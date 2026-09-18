@@ -327,6 +327,75 @@ public class AssSubtitleBuilderTest {
         assertEquals("-1", withBold[7].trim());
     }
 
+
+    // ---- animation -----------------------------------------------------
+
+    @Test
+    public void animatedStylesReachTheExportedLine() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "BLUR_TO_FOCUS";
+        boolean sawTransform = false;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            if (line.contains("{\\k")) {          // the active line
+                assertTrue("BLUR_TO_FOCUS must blur then sharpen: " + line,
+                        line.contains("\\blur10") && line.contains("\\t(0,300,\\blur0)"));
+                sawTransform = true;
+            }
+        }
+        assertTrue("expected at least one active line", sawTransform);
+    }
+
+    @Test
+    public void staticStylesEmitNoTransform() {
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "MINIMAL_FADE";
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            assertFalse("MINIMAL_FADE is static: " + line, line.contains("\\t("));
+        }
+    }
+
+    /**
+     * libass only interpolates the tags that mix their new value with the
+     * current one by the \t power factor (ass_parse.c). A tag outside that set
+     * inside a \t silently does nothing, which is how an "animation" ends up
+     * exported as a static frame while the notes claim otherwise.
+     *
+     * <p>Every tag name in the string is checked, including the ones nested
+     * inside \t(...), so a chained transform cannot smuggle in a dead tag.
+     */
+    @Test
+    public void animationsOnlyUseTagsLibassActuallyInterpolates() {
+        String[] interpolable = {
+                "blur", "1c", "2c", "3c", "4c", "alpha", "1a", "2a", "3a", "4a",
+                "frx", "fry", "frz", "fax", "fay", "fscx", "fscy", "fs", "fsp",
+                "bord", "xbord", "ybord", "shad", "xshad", "yshad", "clip", "iclip"
+        };
+        String[] animated = {
+                "BLUR_TO_FOCUS", "GLITCH_FLICKER", "SHAKE_WIGGLE_EMPHASIS",
+                "TILT_PERSPECTIVE_3D", "ROTATE_IN_3D_FLIP", "CUBE_ROTATE_3D"
+        };
+        for (String id : animated) {
+            String tags = StyleAssMapper.animationTagsFor(id);
+            assertFalse(id + " should be animated", tags.isEmpty());
+            assertTrue(id + " must actually transform something: " + tags,
+                    tags.contains("\\t(") || tags.contains("\\fr"));
+            Matcher m = Pattern.compile("\\\\([a-z0-9]+)").matcher(tags);
+            int checked = 0;
+            while (m.find()) {
+                String name = m.group(1);
+                if ("t".equals(name)) continue;      // the transform wrapper itself
+                boolean ok = false;
+                for (String allowed : interpolable) {
+                    if (allowed.equals(name)) { ok = true; break; }
+                }
+                assertTrue(id + " uses \\" + name + ", which libass does not "
+                        + "interpolate inside \\t", ok);
+                checked++;
+            }
+            assertTrue(id + " should set at least one animated tag", checked > 0);
+        }
+    }
+
     // ---- helpers -------------------------------------------------------
 
     private static String styleLine(String ass) {
