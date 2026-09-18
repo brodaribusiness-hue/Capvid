@@ -50,6 +50,20 @@ public class CaptionStyleOptions {
 
     // ---- Breaks tab ----
     public LineBreakMode lineBreakMode = LineBreakMode.PUNCTUATION;
+
+    /**
+     * Typography. These three used to live on the preview screen as a size
+     * spinner and two checkboxes, next to a style dropdown that duplicated the
+     * template picker. They belong to the look of the caption, so they moved
+     * here and the picker now owns the whole thing.
+     *
+     * <p>The persisted source of truth is still VideoProject.textSizeSp /
+     * .bold / .italic; PreviewActivity copies them in before opening the picker
+     * and back out on Apply, so the two can never disagree.
+     */
+    public float textSizeSp = 12f;
+    public boolean bold = false;
+    public boolean italic = false;
     /** how many lines are visible on screen at once: 1-4 */
     public int pageBreakLines = 1;
 
@@ -95,6 +109,9 @@ public class CaptionStyleOptions {
         o.put("capitalization", capitalization.name());
         o.put("lineBreakMode", lineBreakMode.name());
         o.put("pageBreakLines", pageBreakLines);
+        o.put("textSizeSp", (double) textSizeSp);
+        o.put("bold", bold);
+        o.put("italic", italic);
         return o;
     }
 
@@ -126,6 +143,9 @@ public class CaptionStyleOptions {
         c.capitalization = parseEnum(Capitalization.class, o.optString("capitalization", null), c.capitalization);
         c.lineBreakMode = parseEnum(LineBreakMode.class, o.optString("lineBreakMode", null), c.lineBreakMode);
         c.pageBreakLines = o.optInt("pageBreakLines", c.pageBreakLines);
+        c.textSizeSp = (float) o.optDouble("textSizeSp", c.textSizeSp);
+        c.bold = o.optBoolean("bold", c.bold);
+        c.italic = o.optBoolean("italic", c.italic);
         return c;
     }
 
@@ -161,6 +181,9 @@ public class CaptionStyleOptions {
         c.capitalization = capitalization;
         c.lineBreakMode = lineBreakMode;
         c.pageBreakLines = pageBreakLines;
+        c.textSizeSp = textSizeSp;
+        c.bold = bold;
+        c.italic = italic;
         return c;
     }
 }

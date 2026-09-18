@@ -9,13 +9,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.CheckBox;
 import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.SeekBar;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.VideoView;
@@ -77,7 +74,6 @@ public class PreviewActivity extends AppCompatActivity {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final int[] sizeOptions = {8, 10, 12, 14, 16, 18, 20, 24, 28, 32};
 
     /** Total duration of the source video; -1 until the player is prepared. */
     private long videoDurationMs = -1;
@@ -98,10 +94,6 @@ public class PreviewActivity extends AppCompatActivity {
         progressBar = findViewById(R.id.progressBar);
         playPauseButton = findViewById(R.id.btnPlayPause);
         seekBar = findViewById(R.id.videoSeekBar);
-        Spinner styleSpinner = findViewById(R.id.styleSpinner);
-        Spinner sizeSpinner = findViewById(R.id.sizeSpinner);
-        CheckBox checkBold = findViewById(R.id.checkBold);
-        CheckBox checkItalic = findViewById(R.id.checkItalic);
         exportButton = findViewById(R.id.btnExport);
         Button chooseTemplateButton = findViewById(R.id.btnChooseTemplate);
 
@@ -173,26 +165,7 @@ public class PreviewActivity extends AppCompatActivity {
         trimEndMs = currentProject.trimEndMs;
         scaleFactor = currentProject.scaleFactor;
 
-        // Restore the FULL saved editing state BEFORE the spinners are wired up.
-        // Order matters: attaching an adapter fires its OnItemSelectedListener
-        // once for position 0, and the old code let that initial callback
-        // overwrite the restored style and force the text size back to
-        // sizeOptions[2] on every open.
         restoreOverlayState();
-
-        setupStyleSpinner(styleSpinner);
-        setupSizeSpinner(sizeSpinner);
-
-        checkBold.setChecked(currentProject.bold);
-        checkItalic.setChecked(currentProject.italic);
-        checkBold.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            captionOverlay.setBold(isChecked);
-            saveProjectState();
-        });
-        checkItalic.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            captionOverlay.setItalic(isChecked);
-            saveProjectState();
-        });
 
         playPauseButton.setOnClickListener(v -> {
             if (videoView.isPlaying()) {
@@ -243,7 +216,7 @@ public class PreviewActivity extends AppCompatActivity {
             }
         });
 
-        chooseTemplateButton.setOnClickListener(v -> openTemplatePicker(styleSpinner));
+        chooseTemplateButton.setOnClickListener(v -> openTemplatePicker());
 
         if (isResumed && !currentProject.words.isEmpty()) {
             captionWords = currentProject.words;
@@ -256,9 +229,11 @@ public class PreviewActivity extends AppCompatActivity {
     }
 
     /**
-     * Pushes the persisted project state into the overlay. Called before the
-     * style/size spinners are attached so their initial selection callback
-     * cannot clobber it.
+     * Pushes the persisted project state into the overlay.
+     *
+     * <p>VideoProject.textSizeSp / .bold / .italic are the stored source of
+     * truth; they are copied into the options object here so the picker opens
+     * showing the real values and the two can never drift apart.
      */
     private void restoreOverlayState() {
         try {
@@ -266,7 +241,13 @@ public class PreviewActivity extends AppCompatActivity {
         } catch (IllegalArgumentException ignored) {
             // The saved style id no longer exists in the enum; keep the default.
         }
-        if (currentProject.options != null) captionOverlay.setStyleOptions(currentProject.options);
+        if (currentProject.options != null) {
+            CaptionStyleOptions restored = currentProject.options;
+            restored.textSizeSp = currentProject.textSizeSp;
+            restored.bold = currentProject.bold;
+            restored.italic = currentProject.italic;
+            captionOverlay.setStyleOptions(restored);
+        }
         captionOverlay.setTextSizeSp(currentProject.textSizeSp);
         captionOverlay.setBold(currentProject.bold);
         captionOverlay.setItalic(currentProject.italic);
@@ -295,16 +276,27 @@ public class PreviewActivity extends AppCompatActivity {
         projectManager.save(currentProject);
     }
 
-    private void openTemplatePicker(Spinner styleSpinner) {
-        String currentId = captionOverlay.getStyleType().name();
-        TemplatePickerBottomSheet picker = TemplatePickerBottomSheet.newInstance(currentId);
-        picker.setInitialOptions(captionOverlay.getStyleOptions());
+    private void openTemplatePicker() {
+        // The picker owns the whole look now, typography included, so it has to
+        // be told the live values or it would open showing the defaults and
+        // silently reset the size and weight on Apply.
+        CaptionStyleOptions snapshot = captionOverlay.getStyleOptions().copy();
+        snapshot.textSizeSp = captionOverlay.getTextSizeSp();
+        snapshot.bold = captionOverlay.getBold();
+        snapshot.italic = captionOverlay.getItalic();
+
+        TemplatePickerBottomSheet picker =
+                TemplatePickerBottomSheet.newInstance(captionOverlay.getStyleType().name());
+        picker.setInitialOptions(snapshot);
         picker.setOnApply(this::applyTemplate);
         picker.show(getSupportFragmentManager(), "template_picker");
     }
 
     private void applyTemplate(CaptionStyleDefinition def, CaptionStyleOptions options) {
         captionOverlay.setStyleOptions(options);
+        captionOverlay.setTextSizeSp(options.textSizeSp);
+        captionOverlay.setBold(options.bold);
+        captionOverlay.setItalic(options.italic);
         try {
             CaptionOverlayView.CaptionStyleType type = CaptionOverlayView.CaptionStyleType.valueOf(def.id);
             captionOverlay.setStyleType(type);
@@ -312,63 +304,6 @@ public class PreviewActivity extends AppCompatActivity {
         } catch (IllegalArgumentException e) {
             Toast.makeText(this, "Style \"" + def.displayName + "\" isn't wired into the enum yet", Toast.LENGTH_SHORT).show();
         }
-    }
-
-    private void setupStyleSpinner(Spinner spinner) {
-        CaptionOverlayView.CaptionStyleType[] styles = CaptionOverlayView.CaptionStyleType.values();
-        String[] names = new String[styles.length];
-        for (int i = 0; i < styles.length; i++) names[i] = styles[i].name();
-
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-
-        // Select the project's style so the spinner reflects reality instead of
-        // silently snapping back to the first entry.
-        int selected = 0;
-        for (int i = 0; i < styles.length; i++) {
-            if (styles[i].name().equals(currentProject.styleId)) { selected = i; break; }
-        }
-        spinner.setSelection(selected);
-
-        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view, int position, long id) {
-                captionOverlay.setStyleType(styles[position]);
-                saveProjectState();
-            }
-            @Override
-            public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
-    }
-
-    private void setupSizeSpinner(Spinner spinner) {
-        String[] labels = new String[sizeOptions.length];
-        for (int i = 0; i < sizeOptions.length; i++) labels[i] = String.valueOf(sizeOptions[i]);
-
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, labels);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-
-        // Nearest available size to the saved one (was hard-coded to index 2,
-        // which reset every project to 12sp on open).
-        int selected = 0;
-        float bestDelta = Float.MAX_VALUE;
-        for (int i = 0; i < sizeOptions.length; i++) {
-            float delta = Math.abs(sizeOptions[i] - currentProject.textSizeSp);
-            if (delta < bestDelta) { bestDelta = delta; selected = i; }
-        }
-        spinner.setSelection(selected);
-
-        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view, int position, long id) {
-                captionOverlay.setTextSizeSp(sizeOptions[position]);
-                saveProjectState();
-            }
-            @Override
-            public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-        });
     }
 
     private void startCaptionSyncLoop() {
