@@ -525,7 +525,17 @@ marked otherwise.
 | CAP-034 | MEDIUM | EXPORT | `StyleAssMapper.map` | `GRADIENT_FILL` (6 styles), `CHROME`, `LIQUID_GRADIENT_SWEEP` and `CHROME_METALLIC` were flattened to a single solid colour, so those templates looked nothing like their preview | `Mapping.gradientStops`; rendered as 10 clipped colour bands, each repeating the karaoke timings so the word highlight still advances. `\clip` is absolute script coords (`x2scr_pos_scaled`), which the band rects rely on | `gradientStylesEmitOneClippedEventPerBand`, `gradientBandsStillCarryTheKaraokeTimings`, `gradientInterpolationReachesBothEndStops` |
 | CAP-035 | MEDIUM | EXPORT | `VideoExporter.buildCommand`, `PreviewActivity` | The preview "Scale" slider was multiplied into the encoded frame size, so exporting at 50% produced 540p from a 1080p source - the largest single quality loss in the pipeline. The slider is a preview *zoom*: it scales `VideoView` and the overlay together, so the caption stays proportional at any zoom | export always keeps source resolution; the scale filter now only forces even dimensions; slider relabelled "Preview zoom"; CRF 20 → 18 | CI `assembleDebug`/`assembleRelease` green; command inspected |
 
-**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 10 · MEDIUM 10 · LOW 3 = **35 total, 34 fixed, 1 tracked** (CAP-026, i18n).
+| CAP-036 | MEDIUM | EXPORT | `StyleAssMapper.exportNotes` | While fixing CAP-033 I rewrote `exportNotes` to claim BLUR_TO_FOCUS, GLITCH_FLICKER, RAINBOW_CYCLE, WAVY_BASELINE and SHAKE_WIGGLE_EMPHASIS were "animated with ASS `\t` transforms". **Nothing emitted a `\t` for any of them** - they are not in `MODERN_IDS`, so `ModernStyleAssWriter` never ran for them. Same class of false claim as CAP-033, introduced by me | read `ass_parse.c:670-725` to find which tags `\t` actually interpolates, implemented the six that are expressible (blur ramp, alpha flicker, `\frz` settle, `\frx` tilt, two `\fry` rotations), and made the notes state plainly what RAINBOW_CYCLE, WAVY_BASELINE and DEPTH_STACK_3D really do: burned in flat | `animatedStylesReachTheExportedLine`, `animationsOnlyUseTagsLibassActuallyInterpolates` |
+
+**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 10 · MEDIUM 11 · LOW 3 = **36 total, 35 fixed, 1 tracked** (CAP-026, i18n).
+
+**What `\t` can actually animate** (from `ass_parse.c`, not from documentation):
+`\t` re-parses its argument tags with an interpolation factor, and a tag honours
+it only by mixing with `pwr`. Those are `\blur`, `\1c`-`\4c`, `\alpha` and
+`\1a`-`\4a`, `\frx \fry \frz`, `\fax \fay`, `\fscx \fscy \fs \fsp`,
+`\bord \xbord \ybord`, `\shad \xshad \yshad` and `\clip`/`\iclip`.
+`\pos` and `\move` do **not** interpolate, so no animation here moves position
+through `\t`.
 
 CAP-031 to CAP-035 were found by a person using the app, not by reading it or by
 the 30 unit tests that were passing at the time. That is a real limit on what
@@ -706,7 +716,7 @@ the camera flow are all preserved.
 | Timestamp units | `whisper.h:670` | **CONFIRMED centiseconds → `×10` correct** |
 | Gradle wrapper integrity | `sha256sum` + `wrapper-validation` | **PASS — `d3b261c2…`** |
 | Gradle wrapper scripts launch java correctly | local probe with a stub `java` | **PASS after CAP-029 — correct args and classpath** |
-| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 44 tests, 0 failed, 0 errored, 0 skipped** |
+| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 48 tests, 0 failed, 0 errored, 0 skipped** |
 | `lintDebug` | CI | **PASS** |
 | Native build (NDK 26.1.10909125 / CMake 3.22.1, both ABIs) | `./gradlew assembleDebug` (CI) | **PASS — APK 27,607,385 bytes; `libcapvid_native.so` in `arm64-v8a` and `armeabi-v7a`** |
 | Release build | `./gradlew assembleRelease` (CI) | **PASS** |
@@ -722,8 +732,8 @@ The breakdown, as reported by `tools/junit_summary.py` from Gradle's JUnit XML:
 |---|---:|---:|---:|---:|
 | `com.saad.capvid.caption.CaptionFrameGeometryTest` | 8 | 0 | 0 | 0 |
 | `com.saad.capvid.caption.CaptionLayoutTest` | 12 | 0 | 0 | 0 |
-| `com.saad.capvid.export.AssSubtitleBuilderTest` | 24 | 0 | 0 | 0 |
-| **total** | **44** | **0** | **0** | **0** |
+| `com.saad.capvid.export.AssSubtitleBuilderTest` | 28 | 0 | 0 | 0 |
+| **total** | **48** | **0** | **0** | **0** |
 
 This corrects an earlier figure of 29 (12 + 17) that I quoted from a hand count;
 `grep -c '@Test'` on the two sources gives 12 and 18, and CI executed exactly 30.
