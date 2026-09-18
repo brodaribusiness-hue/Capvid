@@ -78,30 +78,13 @@ jobs:
           fi
           tail -80 "$log"
 
-      - name: Create API 35 emulator
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-          echo "no" | avdmanager create avd \
-            --name capvid-api-35 \
-            --package "system-images;android-35;google_apis;x86_64" \
-            --device "pixel_2" \
-            --force
-
-      - name: Boot emulator
-        shell: bash
-        run: |
-          set -euo pipefail
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
-          nohup emulator -avd capvid-api-35 \
-            -no-window -no-audio -no-boot-anim -no-snapshot \
-            -gpu swiftshader_indirect > /tmp/capvid-emulator.log 2>&1 &
-          adb wait-for-device
-          until adb shell getprop sys.boot_completed | tr -d '\r' | grep -q '1'; do sleep 2; done
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
-
-      - name: Run instrumented tests
-        run: gradle :app:connectedAndroidTest --stacktrace
+      - name: Run instrumented tests on API 35 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          disable-animations: true
+          script: gradle :app:connectedAndroidTest --stacktrace --console=plain
