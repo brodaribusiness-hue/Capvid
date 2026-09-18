@@ -21,9 +21,7 @@ import com.saad.capvid.style.CaptionStyleOptions;
 import com.saad.capvid.style.renderer.ModernCaptionRenderer;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 
 public class CaptionOverlayView extends View {
 
@@ -49,9 +47,6 @@ public class CaptionOverlayView extends View {
         FIRE_HIGHLIGHT, ICE_HIGHLIGHT, PULSE_BEAT, MEGA_BOLD_CAPS, WAVY_BASELINE,
         SINGLE_WORD_FLASH, NEON_PULSE_TEXT, HYPE_BOUNCE_GLOW, TURBO_SHAKE_POP
     }
-
-    private static final int WORDS_PER_LINE = 4;
-    private static final float WORD_SPACING = 22f;
 
     private List<CaptionWord> words;
     private List<List<CaptionWord>> lineGroups = new ArrayList<>();
@@ -102,6 +97,17 @@ public class CaptionOverlayView extends View {
     public boolean getBold() { return bold; }
     public boolean getItalic() { return italic; }
 
+    /**
+     * Restores a saved caption position (see Project.posXFraction/posYFraction).
+     * There was no setter before, so a dragged caption position could never be
+     * persisted or restored.
+     */
+    public void setPositionFractions(float xFraction, float yFraction) {
+        this.posXFraction = Math.max(0.1f, Math.min(0.9f, xFraction));
+        this.posYFraction = Math.max(0.1f, Math.min(0.9f, yFraction));
+        invalidate();
+    }
+
     public void setTextSizeSp(float sp) {
         this.textSizeSp = sp;
         float density = getResources().getDisplayMetrics().scaledDensity;
@@ -112,6 +118,44 @@ public class CaptionOverlayView extends View {
     public float getTextSizeSp() { return textSizeSp; }
     public float getPosXFraction() { return posXFraction; }
     public float getPosYFraction() { return posYFraction; }
+
+    // ------------------------------------------------------------------
+    // Metrics the exporter needs in order to place the burned-in caption
+    // where the preview actually puts it. Without these the export had to
+    // guess (the old code multiplied the sp size by a magic 2.5f), so the
+    // caption came out a different size and a different height in the video
+    // than on screen.
+    // ------------------------------------------------------------------
+
+    /** Rendered text size in device pixels. */
+    public float getTextSizePx() {
+        return textPaint.getTextSize();
+    }
+
+    /** Distance between two consecutive baselines, in device pixels. */
+    public float getLineHeightPx() {
+        return textPaint.getTextSize() + options.lineSpacingPx;
+    }
+
+    /**
+     * Signed distance from the text BASELINE to the vertical CENTRE of the
+     * glyphs, in device pixels (negative: the centre sits above the baseline).
+     *
+     * <p>Android's {@code Canvas.drawText} anchors on the baseline, whereas
+     * libass's {@code \an5} anchor is the vertical centre of the line box. The
+     * exporter adds this to the preview's baseline Y so the two land on the same
+     * spot. Measured with the style typeface active, because ascent/descent are
+     * font-specific.
+     */
+    public float getBaselineToCenterPx() {
+        applyStyleFont();
+        try {
+            Paint.FontMetrics fm = textPaint.getFontMetrics();
+            return (fm.ascent + fm.descent) / 2f;
+        } finally {
+            resetFont();
+        }
+    }
 
     @Override
     protected void onDraw(Canvas canvas) {
@@ -139,18 +183,29 @@ public class CaptionOverlayView extends View {
         windowStart = Math.max(0, Math.min(windowStart, Math.max(0, lineGroups.size() - pages)));
         int windowEnd = Math.min(lineGroups.size(), windowStart + pages);
 
+        // The whole caption block is drawn in the selected style font, which is
+        // also the single font the exported .ass Style specifies. Measuring and
+        // drawing therefore both have to happen with that typeface active:
+        // previously only the ACTIVE word was switched to the style font, so the
+        // surrounding context words were measured AND drawn in the default font.
+        // That made the per-word advance widths wrong (words overlapped or gapped
+        // incorrectly whenever the style font differed in width from the system
+        // font) and made the preview disagree with the burn-in.
         applyStyleFont();
-        float lineHeight = textPaint.getTextSize() + options.lineSpacingPx;
-        resetFont();
+        try {
+            float lineHeight = textPaint.getTextSize() + options.lineSpacingPx;
 
-        // Caption background spans the whole visible block (all pageBreakLines)
-        if (options.captionBgOn) {
-            drawCaptionBackground(canvas, cx, cy, windowStart, windowEnd, lineHeight);
-        }
+            // Caption background spans the whole visible block (all pageBreakLines)
+            if (options.captionBgOn) {
+                drawCaptionBackground(canvas, cx, cy, windowStart, windowEnd, lineHeight);
+            }
 
-        for (int li = windowStart; li < windowEnd; li++) {
-            float lineY = cy + (li - activeLine) * lineHeight;
-            drawLine(canvas, lineGroups.get(li), activeIndex, cx, lineY, progress);
+            for (int li = windowStart; li < windowEnd; li++) {
+                float lineY = cy + (li - activeLine) * lineHeight;
+                drawLine(canvas, lineGroups.get(li), activeIndex, cx, lineY, progress);
+            }
+        } finally {
+            resetFont();
         }
     }
 
@@ -176,7 +231,10 @@ public class CaptionOverlayView extends View {
             boolean isActive = words.indexOf(w) == activeIndex;
 
             if (isActive) {
-                applyStyleFont();
+                // NOTE: no applyStyleFont()/resetFont() here any more - onDraw()
+                // holds the style typeface for the whole block so that the
+                // measureText() calls above and the context words below are all
+                // measured and drawn in the same font.
                 applyShadow(textPaint);
                 if (options.activeWordBgOn) {
                     drawActiveWordBackground(canvas, text, wordCenterX, cy);
@@ -186,7 +244,6 @@ public class CaptionOverlayView extends View {
                     drawStrokePass(canvas, text, wordCenterX, cy);
                 }
                 textPaint.clearShadowLayer();
-                resetFont();
             } else {
                 Paint contextPaint = new Paint(textPaint);
                 contextPaint.setColor(Color.argb(190, 255, 255, 255));
@@ -264,51 +321,19 @@ public class CaptionOverlayView extends View {
 
     /**
      * Splits the flat word list into display lines according to
-     * options.lineBreakMode. Called whenever words or lineBreakMode change.
-     * PUNCTUATION: a line ends at a word ending in . ! ? , (or WORDS_PER_LINE
-     * words, whichever comes first) — same visual cadence as the original
-     * fixed 4-words-per-line behaviour, but break-aware.
-     * SINGLE_WORD: one word per line.
-     * RANDOM: pseudo-random 2-5 word groups (stable seed so it doesn't
-     * re-shuffle every recompose).
+     * options.lineBreakMode. The rules themselves live in
+     * {@link CaptionLayout#group} because the exported .ass file must produce
+     * exactly the same lines as this preview.
      */
     private void regroupLines() {
-        lineGroups = new ArrayList<>();
-        if (words == null || words.isEmpty()) return;
-
-        switch (options.lineBreakMode) {
-            case SINGLE_WORD:
-                for (CaptionWord w : words) lineGroups.add(Collections.singletonList(w));
-                break;
-
-            case RANDOM: {
-                Random rnd = new Random(42);
-                int i = 0;
-                while (i < words.size()) {
-                    int len = 2 + rnd.nextInt(4);
-                    int end = Math.min(words.size(), i + len);
-                    lineGroups.add(new ArrayList<>(words.subList(i, end)));
-                    i = end;
-                }
-                break;
-            }
-
-            case PUNCTUATION:
-            default: {
-                List<CaptionWord> current = new ArrayList<>();
-                for (CaptionWord w : words) {
-                    current.add(w);
-                    String t = w.text == null ? "" : w.text.trim();
-                    boolean endsPunctuation = t.matches(".*[.!?,]$");
-                    if (endsPunctuation || current.size() >= WORDS_PER_LINE) {
-                        lineGroups.add(current);
-                        current = new ArrayList<>();
-                    }
-                }
-                if (!current.isEmpty()) lineGroups.add(current);
-                break;
-            }
-        }
+        // Delegates to CaptionLayout - the SAME grouping the exported .ass file
+        // is built from. Keeping this logic in one place is what stops the
+        // preview and the burn-in from showing different line breaks.
+        List<CaptionLayout.Line> lines =
+                CaptionLayout.group(words, options.lineBreakMode, CaptionLayout.DEFAULT_WORDS_PER_LINE);
+        List<List<CaptionWord>> groups = new ArrayList<>(lines.size());
+        for (CaptionLayout.Line line : lines) groups.add(line.words);
+        lineGroups = groups;
     }
 
     private int lineIndexOf(int wordIndex) {
@@ -385,19 +410,9 @@ public class CaptionOverlayView extends View {
     }
 
     private int findActiveWordIndex() {
-        if (words == null || words.isEmpty()) return -1;
-        if (currentTimeMs < words.get(0).startMs) return -1;
-        // A word stays "active" from its own start until the NEXT word's start
-        // (not just until its own endMs). Whisper timestamps almost always leave
-        // a small gap between words, and the old exact-window check meant no
-        // caption was drawn at all during every such gap. The last word gets a
-        // short trailing buffer instead of a "next start" to fall back on.
-        for (int i = 0; i < words.size(); i++) {
-            CaptionWord w = words.get(i);
-            long segmentEnd = (i < words.size() - 1) ? words.get(i + 1).startMs : w.endMs + 400;
-            if (currentTimeMs >= w.startMs && currentTimeMs < segmentEnd) return i;
-        }
-        return words.size() - 1;
+        // Shared with the exporter via CaptionLayout so preview and burn-in
+        // agree on which word is "now".
+        return CaptionLayout.activeWordIndex(words, currentTimeMs);
     }
 
     private float getProgress(CaptionWord w) {

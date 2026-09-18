@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.saad.capvid.model.CaptionWord;
+import com.saad.capvid.style.CaptionStyleOptions;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -94,6 +95,12 @@ public class ProjectManager {
         o.put("trimEndMs", p.trimEndMs);
         o.put("scaleFactor", p.scaleFactor);
         o.put("styleId", p.styleId);
+        o.put("textSizeSp", (double) p.textSizeSp);
+        o.put("bold", p.bold);
+        o.put("italic", p.italic);
+        o.put("posXFraction", (double) p.posXFraction);
+        o.put("posYFraction", (double) p.posYFraction);
+        o.put("options", p.options != null ? p.options.toJson() : new CaptionStyleOptions().toJson());
 
         JSONArray words = new JSONArray();
         for (CaptionWord w : p.words) {
@@ -118,6 +125,12 @@ public class ProjectManager {
         p.trimEndMs = o.optLong("trimEndMs", -1);
         p.scaleFactor = (float) o.optDouble("scaleFactor", 1.0);
         p.styleId = o.optString("styleId", "MINIMAL_FADE");
+        p.textSizeSp = (float) o.optDouble("textSizeSp", 20.0);
+        p.bold = o.optBoolean("bold", false);
+        p.italic = o.optBoolean("italic", false);
+        p.posXFraction = (float) o.optDouble("posXFraction", 0.5);
+        p.posYFraction = (float) o.optDouble("posYFraction", 0.85);
+        p.options = CaptionStyleOptions.fromJson(o.optJSONObject("options"));
 
         JSONArray words = o.optJSONArray("words");
         if (words != null) {

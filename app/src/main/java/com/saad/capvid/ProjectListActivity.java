@@ -44,7 +44,11 @@ public class ProjectListActivity extends AppCompatActivity {
         Intent intent = new Intent(this, PreviewActivity.class);
         intent.putExtra("videoUri", Uri.parse(project.videoUri));
         intent.putExtra("projectId", project.id);
-        intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        // No FLAG_GRANT_READ_URI_PERMISSION here: that flag only applies when
+        // handing a URI to a DIFFERENT app. This is an explicit intent to our own
+        // PreviewActivity; what actually makes the stored content:// URI readable
+        // is the persistable permission CreateActivity took when the video was
+        // first picked.
         startActivity(intent);
         finish();
     }

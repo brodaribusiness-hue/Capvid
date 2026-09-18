@@ -1,10 +1,43 @@
 package com.saad.capvid.font;
 
 import com.saad.capvid.caption.CaptionOverlayView.CaptionStyleType;
+import com.saad.capvid.style.CaptionStyleCatalog;
+import com.saad.capvid.style.CaptionStyleDefinition;
 
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Resolves, for a given caption style, (a) which bundled font asset to render
+ * with and (b) the exact font FAMILY NAME libass has to be given in the .ass
+ * file so the exported video uses that same font.
+ *
+ * <h3>Why the asset comes from CaptionStyleCatalog</h3>
+ * This class used to keep its own 60-entry table of style -&gt; font. That table
+ * silently drifted out of sync with the catalog: SUBTITLE_BAR was declared as
+ * "RobotoMono-Regular.ttf" in the catalog (so the template picker previewed
+ * Regular) while this class mapped it to "RobotoMono-Bold.ttf" (so the overlay
+ * and the export rendered Bold). The catalog is now the single source of truth
+ * and this class only derives from it, so the two can no longer disagree.
+ *
+ * <h3>Why ASS_FAMILY_NAMES has to be exact</h3>
+ * At export time FFmpeg hands the .ass file to libass, and libass resolves the
+ * "Fontname" of a Style by matching it against the family name recorded in each
+ * font file's OpenType {@code name} table (name ID 1) for the fonts it finds in
+ * {@code fontsdir}. If the name we write does not match, libass does NOT error -
+ * it silently substitutes its built-in default face, so the exported video comes
+ * out in a different font than the on-screen preview with no warning at all.
+ *
+ * The values below are the literal name-ID-1 strings read out of the bundled
+ * files (verified with fontTools; {@code tools/audit_static.py} re-checks them
+ * on every run and fails the build if a font file changes underneath us):
+ *
+ * <pre>
+ *   All-Genders-Regular-v4.otf    -&gt; "All Genders v4"      (was wrongly "All Genders")
+ *   Jost-Black.ttf                -&gt; "Jost Black"          (was wrongly "Jost")
+ *   solid 3d.ttf                  -&gt; "Solid 3d"            (lower-case d, as recorded)
+ * </pre>
+ */
 public class StyleFontMap {
 
     public static class FontInfo {
@@ -17,89 +50,69 @@ public class StyleFontMap {
         }
     }
 
-    private static final Map<CaptionStyleType, FontInfo> MAP = new HashMap<>();
+    /**
+     * asset filename -&gt; real family name recorded in that file's name table.
+     * Every entry in {@link FontManager#FONT_FILES} must appear here, otherwise
+     * {@link #familyNameFor(String)} falls back to a filename-derived guess that
+     * libass will not match.
+     */
+    private static final Map<String, String> ASS_FAMILY_NAMES = new HashMap<>();
 
     static {
-        FontInfo defaultFont = new FontInfo("All-Genders-Regular-v4.otf", "All Genders");
-        FontInfo typewriterFont = new FontInfo("RobotoMono-Bold.ttf", "Roboto Mono");
-        FontInfo calligraphyFont = new FontInfo("Calligrapher-JRxaE.ttf", "Calligrapher");
-        FontInfo markerFont = new FontInfo("Jost-Black.ttf", "Jost");
-        FontInfo stampFont = new FontInfo("ChauPhilomeneOne-Regular.ttf", "Chau Philomene One");
-        FontInfo bounceFont = new FontInfo("SoulDaisy.otf", "Soul Daisy");
-        FontInfo solid3dFont = new FontInfo("solid 3d.ttf", "Solid 3D");
-
-        MAP.put(CaptionStyleType.MINIMAL_FADE, defaultFont);
-        MAP.put(CaptionStyleType.KARAOKE_HIGHLIGHT, defaultFont);
-        MAP.put(CaptionStyleType.WORD_POP_SCALE, defaultFont);
-        MAP.put(CaptionStyleType.GLOW_POP, defaultFont);
-        MAP.put(CaptionStyleType.COLOR_SPLASH, defaultFont);
-        MAP.put(CaptionStyleType.SHADOW_PULSE, defaultFont);
-        MAP.put(CaptionStyleType.UNDERLINE_DRAW, defaultFont);
-        MAP.put(CaptionStyleType.SLIDE_IN_CASCADE, defaultFont);
-        MAP.put(CaptionStyleType.SHAKE_WIGGLE_EMPHASIS, defaultFont);
-        MAP.put(CaptionStyleType.BLUR_TO_FOCUS, defaultFont);
-        MAP.put(CaptionStyleType.GRADIENT_WAVE, defaultFont);
-
-        MAP.put(CaptionStyleType.TYPEWRITER, typewriterFont);
-        MAP.put(CaptionStyleType.ZIGZAG_CALLIGRAPHY, calligraphyFont);
-        MAP.put(CaptionStyleType.HIGHLIGHT_BOX_MARKER, markerFont);
-        MAP.put(CaptionStyleType.STAMP_IMPACT, stampFont);
-        MAP.put(CaptionStyleType.BOUNCE_POP, bounceFont);
-
-        MAP.put(CaptionStyleType.DEPTH_STACK_3D, solid3dFont);
-        MAP.put(CaptionStyleType.CUBE_ROTATE_3D, solid3dFont);
-        MAP.put(CaptionStyleType.TILT_PERSPECTIVE_3D, solid3dFont);
-        MAP.put(CaptionStyleType.ROTATE_IN_3D_FLIP, solid3dFont);
-
-        // --- new modern/advanced styles ---
-        MAP.put(CaptionStyleType.NEON_OUTLINE_GLOW, defaultFont);
-        MAP.put(CaptionStyleType.LIQUID_GRADIENT_SWEEP, defaultFont);
-        MAP.put(CaptionStyleType.GLASSMORPHISM_CARD, defaultFont);
-        MAP.put(CaptionStyleType.CHROME_METALLIC, markerFont);
-        MAP.put(CaptionStyleType.DUOTONE_SPLIT, markerFont);
-        MAP.put(CaptionStyleType.CONFETTI_POP, bounceFont);
-        MAP.put(CaptionStyleType.MARKER_HIGHLIGHT_ROTATE, defaultFont);
-        MAP.put(CaptionStyleType.COMIC_BOUNCE_OUTLINE, stampFont);
-        MAP.put(CaptionStyleType.CINEMATIC_LETTERBOX, defaultFont);
-        MAP.put(CaptionStyleType.SPLIT_REVEAL_SCAN, defaultFont);
-
-        // --- Featured tab additions (12) ---
-        MAP.put(CaptionStyleType.BACKGROUND_CARD, defaultFont);
-        MAP.put(CaptionStyleType.GRADIENT_TEXT, markerFont);
-        MAP.put(CaptionStyleType.SOFT_SHADOW_RIGHT, defaultFont);
-        MAP.put(CaptionStyleType.ROUNDED_PILL_HIGHLIGHT, defaultFont);
-        MAP.put(CaptionStyleType.OUTLINE_STROKE, markerFont);
-        MAP.put(CaptionStyleType.DUAL_TONE, defaultFont);
-        MAP.put(CaptionStyleType.SUBTITLE_BAR, typewriterFont);
-        MAP.put(CaptionStyleType.BOX_GLOW_COMBO, defaultFont);
-        MAP.put(CaptionStyleType.LINE_UNDERLINE_SWEEP, defaultFont);
-        MAP.put(CaptionStyleType.SOFT_CARD_SHADOW, defaultFont);
-        MAP.put(CaptionStyleType.CORNER_ROUNDED_HIGHLIGHT, markerFont);
-        MAP.put(CaptionStyleType.CLEAN_CAPS, markerFont);
-
-        // --- Viral tab additions (18) ---
-        MAP.put(CaptionStyleType.EMOJI_POP_ACCENT, bounceFont);
-        MAP.put(CaptionStyleType.FLASH_CUT, markerFont);
-        MAP.put(CaptionStyleType.RAINBOW_CYCLE, defaultFont);
-        MAP.put(CaptionStyleType.PUNCH_IN, bounceFont);
-        MAP.put(CaptionStyleType.STICKER_POP, stampFont);
-        MAP.put(CaptionStyleType.BOLD_DROP_SHADOW_BOUNCE, markerFont);
-        MAP.put(CaptionStyleType.COMIC_POP, stampFont);
-        MAP.put(CaptionStyleType.SPEED_RAMP_TEXT, defaultFont);
-        MAP.put(CaptionStyleType.GLITCH_FLICKER, typewriterFont);
-        MAP.put(CaptionStyleType.FIRE_HIGHLIGHT, bounceFont);
-        MAP.put(CaptionStyleType.ICE_HIGHLIGHT, defaultFont);
-        MAP.put(CaptionStyleType.PULSE_BEAT, defaultFont);
-        MAP.put(CaptionStyleType.MEGA_BOLD_CAPS, markerFont);
-        MAP.put(CaptionStyleType.WAVY_BASELINE, calligraphyFont);
-        MAP.put(CaptionStyleType.SINGLE_WORD_FLASH, markerFont);
-        MAP.put(CaptionStyleType.NEON_PULSE_TEXT, defaultFont);
-        MAP.put(CaptionStyleType.HYPE_BOUNCE_GLOW, bounceFont);
-        MAP.put(CaptionStyleType.TURBO_SHAKE_POP, stampFont);
+        ASS_FAMILY_NAMES.put("All-Genders-Regular-v4.otf", "All Genders v4");
+        ASS_FAMILY_NAMES.put("Calligrapher-JRxaE.ttf", "Calligrapher");
+        ASS_FAMILY_NAMES.put("ChauPhilomeneOne-Regular.ttf", "Chau Philomene One");
+        ASS_FAMILY_NAMES.put("JavaCalligraphy-w1Pw6.ttf", "Java Calligraphy");
+        ASS_FAMILY_NAMES.put("Jost-Black.ttf", "Jost Black");
+        ASS_FAMILY_NAMES.put("KhatijaCalligraphy-0Z5o.otf", "Khatija Calligraphy");
+        ASS_FAMILY_NAMES.put("RobotoMono-Bold.ttf", "Roboto Mono");
+        ASS_FAMILY_NAMES.put("RobotoMono-Regular.ttf", "Roboto Mono");
+        ASS_FAMILY_NAMES.put("SoulDaisy.otf", "Soul Daisy");
+        ASS_FAMILY_NAMES.put("solid 3d.ttf", "Solid 3d");
     }
 
+    /** Fallback used when a style id has no catalog entry (should never happen). */
+    private static final String DEFAULT_ASSET = "All-Genders-Regular-v4.otf";
+
+    /**
+     * @return the font to use for {@code style}, taken from that style's
+     *         CaptionStyleDefinition.fontAsset.
+     */
     public static FontInfo get(CaptionStyleType style) {
-        FontInfo info = MAP.get(style);
-        return info != null ? info : MAP.get(CaptionStyleType.MINIMAL_FADE);
+        return get(style != null ? style.name() : null);
+    }
+
+    /**
+     * @param styleId a CaptionStyleType name, or null
+     */
+    public static FontInfo get(String styleId) {
+        String asset = assetForStyleId(styleId);
+        return new FontInfo(asset, familyNameFor(asset));
+    }
+
+    /** The catalog is the single source of truth for which font a style uses. */
+    public static String assetForStyleId(String styleId) {
+        if (styleId != null) {
+            CaptionStyleDefinition def = CaptionStyleCatalog.byId(styleId);
+            if (def != null && def.fontAsset != null && !def.fontAsset.isEmpty()) {
+                return def.fontAsset;
+            }
+        }
+        return DEFAULT_ASSET;
+    }
+
+    /**
+     * The libass family name for an arbitrary asset - needed for the Fonts tab,
+     * where the user can override a template's font with any bundled file.
+     */
+    public static String familyNameFor(String assetFileName) {
+        if (assetFileName == null) return familyNameFor(DEFAULT_ASSET);
+        String known = ASS_FAMILY_NAMES.get(assetFileName);
+        if (known != null) return known;
+        // Unknown file: strip the extension and the trailing style suffix so we
+        // still produce something plausible rather than a filename with ".ttf".
+        String base = assetFileName.replaceAll("\\.(?i:ttf|otf|ttc)$", "");
+        base = base.replaceAll("[-_ ](Regular|Bold|Italic|Black|Medium|Light|Thin|SemiBold|ExtraBold)$", "");
+        return base.replace('-', ' ').replace('_', ' ');
     }
 }

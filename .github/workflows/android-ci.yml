@@ -2,26 +2,38 @@ name: Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
 
+# whisper.cpp is a git submodule pinned to an exact commit, so the build is
+# reproducible from the repository alone. There is deliberately no
+# "git clone whisper.cpp" step here any more: cloning an unpinned `main` meant
+# CI could build something that no local checkout could reproduce, and that a
+# breaking upstream change would land in the build with no diff in this repo.
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (with pinned submodules)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
-      - name: Clone whisper.cpp into cpp source tree
+      - name: Verify the pinned whisper.cpp source is present
         run: |
-          rm -rf app/src/main/cpp/whisper
-          git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git app/src/main/cpp/whisper
+          set -e
+          test -f app/src/main/cpp/whisper/include/whisper.h \
+            || { echo "::error::whisper.cpp submodule is not populated. Run: git submodule update --init --recursive"; exit 1; }
+          echo "whisper.cpp present at commit $(git submodule status app/src/main/cpp/whisper)"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -32,7 +44,7 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT || true
 
-      - name: Install required SDK platform / build-tools / NDK / CMake
+      - name: Install SDK platform, build-tools, NDK and CMake
         run: |
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platforms;android-34" \
@@ -40,16 +52,50 @@ jobs:
             "ndk;26.1.10909125" \
             "cmake;3.22.1"
 
-      - name: Set up Gradle (no wrapper present in repo)
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.5'
+      # Contract checks that a plain compile does not catch: package/directory
+      # consistency, R.* references, style catalog <-> enum coverage, JNI symbol
+      # matching, and - importantly - that every ASS family name we claim matches
+      # the real family name inside the bundled font file (a mismatch silently
+      # falls back to a default face in the exported video, with no error).
+      - name: Static contract audit
+        run: |
+          python3 -m pip install --quiet fonttools
+          python3 tools/audit_static.py
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
 
-      - name: Upload APK artifact
+      - name: Unit tests (caption layout + ASS generation)
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace || echo "::warning::lint reported findings"
+
+      - name: Build debug APK (compiles the native whisper.cpp bridge)
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Verify the native library was built for both ABIs
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          for abi in arm64-v8a armeabi-v7a; do
+            unzip -l "$APK" | grep -q "lib/$abi/libcapvid_native.so" \
+              || { echo "::error::libcapvid_native.so missing for $abi"; exit 1; }
+            echo "OK lib/$abi/libcapvid_native.so"
+          done
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: capvid-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/reports/tests/

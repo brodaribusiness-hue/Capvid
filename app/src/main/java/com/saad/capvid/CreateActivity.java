@@ -17,31 +17,55 @@ import com.google.android.material.button.MaterialButton;
  */
 public class CreateActivity extends AppCompatActivity {
 
-    private ActivityResultLauncher<String> videoPickerLauncher;
+    private ActivityResultLauncher<String[]> videoPickerLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_create);
 
+        // ACTION_OPEN_DOCUMENT (not ACTION_GET_CONTENT) is deliberate: it is the
+        // only picker whose result carries a PERSISTABLE URI permission. A
+        // GetContent grant is temporary and is revoked once the receiving
+        // activity finishes - and this activity calls finish() immediately - so
+        // the stored content:// URI in a saved project became unreadable the
+        // moment the user left, and reopening that project failed with a
+        // SecurityException on the very first frame read.
         videoPickerLauncher = registerForActivityResult(
-                new ActivityResultContracts.GetContent(),
-                uri -> { if (uri != null) openPreview(uri); }
+                new ActivityResultContracts.OpenDocument(),
+                uri -> {
+                    if (uri == null) return;
+                    takePersistablePermission(uri);
+                    openPreview(uri);
+                }
         );
 
         MaterialButton btnCaption = findViewById(R.id.btnCaption);
         MaterialButton btnRecordVideo = findViewById(R.id.btnRecordVideo);
 
-        btnCaption.setOnClickListener(v -> videoPickerLauncher.launch("video/*"));
+        btnCaption.setOnClickListener(v -> videoPickerLauncher.launch(new String[]{"video/*"}));
         btnRecordVideo.setOnClickListener(v -> startActivity(new Intent(this, RecordVideoActivity.class)));
 
         findViewById(R.id.btnExitCreate).setOnClickListener(v -> finish());
     }
 
+    /**
+     * Upgrades the picker's temporary grant to a persistable one so the project
+     * can still read its source video after a process restart.
+     */
+    private void takePersistablePermission(Uri uri) {
+        try {
+            getContentResolver().takePersistableUriPermission(
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            // Not every provider offers persistable grants. The video still opens
+            // now; it just may not survive a restart.
+        }
+    }
+
     private void openPreview(Uri videoUri) {
         Intent intent = new Intent(this, PreviewActivity.class);
         intent.putExtra("videoUri", videoUri);
-        intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         startActivity(intent);
         finish();
     }
