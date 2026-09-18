@@ -379,7 +379,10 @@ public class AssSubtitleBuilderTest {
             assertFalse(id + " should be animated", tags.isEmpty());
             assertTrue(id + " must actually transform something: " + tags,
                     tags.contains("\\t(") || tags.contains("\\fr"));
-            Matcher m = Pattern.compile("\\\\([a-z0-9]+)").matcher(tags);
+            // An ASS tag name is an optional single leading digit (\1c, \4a)
+            // followed by letters. Matching [a-z0-9]+ instead swallows the
+            // tag's VALUE - \blur10 reads as a tag called "blur10".
+            Matcher m = Pattern.compile("\\\\([0-9]?[a-z]+)").matcher(tags);
             int checked = 0;
             while (m.find()) {
                 String name = m.group(1);
