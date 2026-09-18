@@ -55,14 +55,28 @@ jobs:
       - name: Assemble debug APK
         shell: bash
         run: |
-          set -o pipefail
-          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tail -250
+          set -euo pipefail
+          log=/tmp/capvid-assemble.log
+          if ! gradle :app:assembleDebug --stacktrace --console=plain >"$log" 2>&1; then
+            summary=$(tail -120 "$log" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/:/%3A/g; s/,/%2C/g')
+            echo "::error title=Gradle assemble failure::$summary"
+            tail -120 "$log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          tail -80 "$log"
 
       - name: Run JVM unit tests
         shell: bash
         run: |
-          set -o pipefail
-          gradle :app:test --stacktrace --console=plain 2>&1 | tail -250
+          set -euo pipefail
+          log=/tmp/capvid-test.log
+          if ! gradle :app:test --stacktrace --console=plain >"$log" 2>&1; then
+            summary=$(tail -120 "$log" | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/:/%3A/g; s/,/%2C/g')
+            echo "::error title=Gradle test failure::$summary"
+            tail -120 "$log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          tail -80 "$log"
 
       - name: Create API 35 emulator
         shell: bash
