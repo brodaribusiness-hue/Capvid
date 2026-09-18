@@ -69,35 +69,39 @@ jobs:
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           LOG=/tmp/sdk-install.log
           : > "$LOG"
-          {
-            echo "sdkmanager path : $SDKM"
-            echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
-            echo "--- disk before ---"; df -h "$ANDROID_SDK_ROOT" 2>&1
-            echo "--- cmdline-tools ---"; ls -la "$ANDROID_SDK_ROOT/cmdline-tools" 2>&1
-            echo "--- already installed ---"; "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --list_installed 2>&1 | tail -40
-            echo "--- sdkmanager --version ---"; "$SDKM" --version 2>&1
-          } >> "$LOG" 2>&1
+          echo "--- disk before ---" >> "$LOG"
+          df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
 
           set +e
-          overall=0
-          # Installed one package at a time so a failure names the package.
           for pkg in "platforms;android-34" "build-tools;34.0.0" "platform-tools" "cmake;3.22.1" "ndk;26.1.10909125"; do
             echo "===== installing: $pkg =====" >> "$LOG"
-            yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --verbose "$pkg" >> "$LOG" 2>&1
-            rc=$?
-            echo "===== $pkg -> exit $rc =====" >> "$LOG"
-            echo "--- disk after $pkg ---" >> "$LOG"
-            df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
-            [ "$rc" -eq 0 ] || overall=$rc
+            yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$pkg" >> "$LOG" 2>&1
+            echo "===== $pkg -> sdkmanager exit $? =====" >> "$LOG"
           done
-          echo "overall exit: $overall" >> "$LOG"
+          echo "--- disk after ---" >> "$LOG"
+          df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
           set -e
 
-          # Strip the carriage-return progress bars so the log is readable.
-          tr '\r' '\n' < "$LOG" | grep -vE "^\[[ =]*\] *[0-9]+%" > /tmp/sdk-install.clean.log || true
-          mv /tmp/sdk-install.clean.log "$LOG"
-          cat "$LOG"
-          exit $overall
+          # sdkmanager exits 1 even after installing successfully: on the
+          # ubuntu-latest runner it returned 1 for cmake;3.22.1 and
+          # ndk;26.1.10909125 after printing "Install ... finished." (and after
+          # 2 GB landed on disk), and 1 for platform-tools when it was already
+          # present. Its exit status is therefore not used to decide success;
+          # what is actually on disk is.
+          missing=0
+          for dir in platforms/android-34 build-tools/34.0.0 platform-tools cmake/3.22.1 ndk/26.1.10909125; do
+            if [ -d "$ANDROID_SDK_ROOT/$dir" ]; then
+              echo "OK      $dir"
+            else
+              echo "MISSING $dir"
+              missing=1
+            fi
+          done
+
+          tr '\r' '\n' < "$LOG" | grep -vE "^\[[ =]*\] *[0-9]+%" > /tmp/sdk.clean.log || true
+          mv /tmp/sdk.clean.log "$LOG"
+          tail -n 60 "$LOG"
+          exit $missing
 
       - name: Static contract audit
         run: |
