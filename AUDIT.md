@@ -527,7 +527,13 @@ marked otherwise.
 
 | CAP-036 | MEDIUM | EXPORT | `StyleAssMapper.exportNotes` | While fixing CAP-033 I rewrote `exportNotes` to claim BLUR_TO_FOCUS, GLITCH_FLICKER, RAINBOW_CYCLE, WAVY_BASELINE and SHAKE_WIGGLE_EMPHASIS were "animated with ASS `\t` transforms". **Nothing emitted a `\t` for any of them** - they are not in `MODERN_IDS`, so `ModernStyleAssWriter` never ran for them. Same class of false claim as CAP-033, introduced by me | read `ass_parse.c:670-725` to find which tags `\t` actually interpolates, implemented the six that are expressible (blur ramp, alpha flicker, `\frz` settle, `\frx` tilt, two `\fry` rotations), and made the notes state plainly what RAINBOW_CYCLE, WAVY_BASELINE and DEPTH_STACK_3D really do: burned in flat | `animatedStylesReachTheExportedLine`, `animationsOnlyUseTagsLibassActuallyInterpolates` |
 
-**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 10 · MEDIUM 11 · LOW 3 = **36 total, 35 fixed, 1 tracked** (CAP-026, i18n).
+| CAP-037 | HIGH | EXPORT | `StyleAssMapper.map`, `AssSubtitleBuilder.build` | Two more preview features never reached the burn-in. (a) The ASS Style has ONE Shadow field and libass copies it to both axes (`ass_render.c:1105-1106`: `shadow_x = shadow_y = style->Shadow`), so the picker's "shadow direction: Down" exported as a diagonal down-right shadow. (b) The preview separates words by `options.wordSpacingPx` (22px by default); the export emitted a single space with whatever advance the font has, so every line came out narrower than the preview | read `ass_parse.c:373,381,457`; Style Shadow left at 0 and the offset emitted per event as `\xshad`/`\yshad`; word spacing emitted as `\fsp` spread over the line's glyphs so the caption's footprint matches | `aDownShadowMovesOnlyY`, `aRightShadowMovesOnlyX`, `theStyleShadowFieldIsAlwaysZero`, `thePreviewWordSpacingReachesTheExport`, `aSingleWordLineGetsNoTrackingTag` |
+| CAP-038 | HIGH | CAPTION | `CaptionStyleCatalog` (all 60 palettes) | **25 of the 60 templates were unreadable on ordinary footage.** Measured as the worst frame a caption can ever meet, 25 fell below 3:1 - GLASSMORPHISM_CARD and SOFT_CARD_SHADOW were white text on a 43%-opacity white card (1.00:1), MEGA_BOLD_CAPS yellow on a white box (1.20:1), OUTLINE_STROKE white on white (1.00:1) | a caption sits on footage nobody controls, so it must survive EVERY backdrop; 25 palettes were fixed and `StyleAssMapper.ensureLegible()` now supplies the missing light/dark element at runtime | `tools/audit_contrast.py` (CI step 8) reports **60/60 clear 3:1**; `legibility*` unit tests |
+| CAP-039 | MEDIUM | UI | `activity_preview.xml`, `PreviewActivity.setupStyleSpinner` | A "Caption Style" dropdown listed raw enum names (MINIMAL_FADE, GLOW_POP, ...) beside a template picker that already offers all 60 with previews and swatches - two ways to choose a style, two ways to be out of sync, and the dropdown showed names no user would recognise. Text size and Bold/Italic lived outside the picker too | dropdown removed; size/weight moved into the picker's Font tab; `textSizeSp`/`bold`/`italic` moved into `CaptionStyleOptions` with VideoProject still the stored source of truth | manual: the preview screen is now Trim / Scale / Preview zoom / Choose Template / Export |
+| CAP-040 | MEDIUM | CAPTION | `StyleAssMapper.luminance`, `AssSubtitleBuilderTest` | The first contrast tests failed 6/64 with `expected:<4.62> but was:<1.0>`. `android.graphics.Color` is a no-op stub in the mockable android.jar (`returnDefaultValues = true`), so `Color.red()` returned 0, every colour was black, and every ratio was exactly 1.0 - `ensureLegible` then shadowed all 60 templates | the WCAG maths now shifts bits instead of calling `Color`; catalog-dependent tests `Assume` real colours and skip with a reason; the catalog itself is verified by the Python auditor, which reads the hex literals out of the source | CI run 35348197570: 69 tests, 0 failed, **6 skipped** - the skips are the guarded ones, not silent passes |
+| CAP-041 | MEDIUM | EXPORT | `StyleAssMapper.optionNotes` | `options.activeWordBgOn` was silently dropped at export: the preview draws the active-word box with `Canvas.drawRoundRect`, but a karaoke line exposes no per-word x offsets for libass to anchor a vector box to | cannot be burned in; now reported to the user before export instead of being dropped quietly | `theActiveWordBoxIsReportedAsNotExported` |
+
+**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 12 · MEDIUM 14 · LOW 3 = **41 total, 40 fixed, 1 tracked** (CAP-026, i18n).
 
 **What `\t` can actually animate** (from `ass_parse.c`, not from documentation):
 `\t` re-parses its argument tags with an interpolation factor, and a tag honours
@@ -716,7 +722,8 @@ the camera flow are all preserved.
 | Timestamp units | `whisper.h:670` | **CONFIRMED centiseconds → `×10` correct** |
 | Gradle wrapper integrity | `sha256sum` + `wrapper-validation` | **PASS — `d3b261c2…`** |
 | Gradle wrapper scripts launch java correctly | local probe with a stub `java` | **PASS after CAP-029 — correct args and classpath** |
-| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 48 tests, 0 failed, 0 errored, 0 skipped** |
+| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 69 tests, 0 failed, 0 errored, 6 skipped** |
+| Caption contrast | `python3 tools/audit_contrast.py` (CI) | **PASS — 60/60 templates clear 3:1 on their worst possible frame** |
 | `lintDebug` | CI | **PASS** |
 | Native build (NDK 26.1.10909125 / CMake 3.22.1, both ABIs) | `./gradlew assembleDebug` (CI) | **PASS — APK 27,607,385 bytes; `libcapvid_native.so` in `arm64-v8a` and `armeabi-v7a`** |
 | Release build | `./gradlew assembleRelease` (CI) | **PASS** |
@@ -732,8 +739,15 @@ The breakdown, as reported by `tools/junit_summary.py` from Gradle's JUnit XML:
 |---|---:|---:|---:|---:|
 | `com.saad.capvid.caption.CaptionFrameGeometryTest` | 8 | 0 | 0 | 0 |
 | `com.saad.capvid.caption.CaptionLayoutTest` | 12 | 0 | 0 | 0 |
-| `com.saad.capvid.export.AssSubtitleBuilderTest` | 28 | 0 | 0 | 0 |
-| **total** | **48** | **0** | **0** | **0** |
+| `com.saad.capvid.export.AssSubtitleBuilderTest` | 49 | 0 | 0 | 6 |
+| **total** | **69** | **0** | **0** | **6** |
+
+The 6 skips are deliberate. `android.graphics.Color` is a no-op stub in the
+mockable android.jar that JVM unit tests run against, so every catalog colour
+reads back as 0; a contrast test would compare black against black and report a
+pass it had not earned. Those tests `Assume` real colours and skip with a reason
+instead (CAP-040). The catalog is verified for real by `tools/audit_contrast.py`,
+which parses the hex literals out of the source.
 
 This corrects an earlier figure of 29 (12 + 17) that I quoted from a hand count;
 `grep -c '@Test'` on the two sources gives 12 and 18, and CI executed exactly 30.
