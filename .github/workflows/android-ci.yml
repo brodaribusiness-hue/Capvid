@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
+    # Needed so the failure-reporting step can post the build output as a pull
+    # request comment. Runner log archives are served from
+    # results-receiver.actions.githubusercontent.com, which is not reachable
+    # from every network; the REST API is.
+    permissions:
+      contents: read
+      pull-requests: write
+
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -109,28 +117,36 @@ jobs:
       # check-runs API returns directly.
       - name: Publish compiler output on failure
         if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # errexit/pipefail off: this step only reports, it must never fail and
-          # hide the original error (grep exits 1 when it finds no match).
+          # hide the original error (grep exits 1 when it matches nothing).
           set +e
           set +o pipefail
+          BODY=/tmp/failure-comment.md
           {
-            echo "## Build failure - captured output"
+            echo "### CI failure - captured output (run ${GITHUB_RUN_ID})"
             found=0
             for f in /tmp/*.log; do
               [ -f "$f" ] || continue
               found=1
               echo ""
-              echo "### $f"
+              echo "#### $f"
               echo '```'
-              tail -n 200 "$f"
+              tail -n 150 "$f"
               echo '```'
             done
-            if [ "$found" -eq 0 ]; then
-              echo ""
-              echo "No logs were captured in /tmp."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
+            [ "$found" -eq 1 ] || echo "No logs were captured in /tmp."
+          } | tee "$GITHUB_STEP_SUMMARY" > "$BODY"
+
+          # The runner log archive lives on a host that is not reachable from
+          # every network, so the same output is posted to the pull request,
+          # where it can be read through the REST API.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "$GITHUB_REPOSITORY" --body-file "$BODY"
+          fi
           exit 0
 
       - name: Verify the native library was built for both ABIs
