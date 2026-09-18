@@ -73,7 +73,7 @@ public class CaptionStyleCatalog {
                 colors("#7B2FF7", "#2979FF", "#00E5FF", "#FFFFFF"), "All-Genders-Regular-v4.otf", false, GRADIENT_FILL, true));
 
         list.add(style("GLASSMORPHISM_CARD", "Glassmorphism Card", cats(FEATURED),
-                colors("#FFFFFF", "#FFFFFF", "#D8D8D8", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
+                colors("#0A0A0F", "#FFFFFF", "#D8D8D8", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
 
         list.add(style("CHROME_METALLIC", "Chrome Metallic", cats(FEATURED),
                 colors("#E0E0E0", "#9E9E9E", "#FFFFFF", "#000000"), "Jost-Black.ttf", false, CHROME, true));
@@ -88,7 +88,7 @@ public class CaptionStyleCatalog {
                 colors("#D8D8D8", "#000000", "#7B2FF7", "#2979FF"), "All-Genders-Regular-v4.otf", false, SPLIT_HALF, true));
 
         list.add(style("BACKGROUND_CARD", "Background Card", cats(FEATURED),
-                colors("#1C1C1E", "#FFFFFF", "#D8D8D8", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
+                colors("#030304", "#FFFFFF", "#D8D8D8", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
 
         list.add(style("GRADIENT_TEXT", "Gradient Text", cats(FEATURED),
                 colors("#2979FF", "#7B2FF7", "#FF4FA0", "#FFFFFF"), "Jost-Black.ttf", false, GRADIENT_FILL, true));
@@ -97,7 +97,7 @@ public class CaptionStyleCatalog {
                 colors("#FFFFFF", "#FFFFFF", "#FFFFFF", "#333333"), "All-Genders-Regular-v4.otf", false, PLAIN, true));
 
         list.add(style("ROUNDED_PILL_HIGHLIGHT", "Rounded Pill Highlight", cats(FEATURED),
-                colors("#2979FF", "#FFFFFF", "#FFFFFF", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_SOLID, true));
+                colors("#001A4D", "#FFFFFF", "#FFFFFF", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_SOLID, true));
 
         list.add(style("OUTLINE_STROKE", "Outline Stroke", cats(FEATURED),
                 colors("#FFFFFF", "#FFFFFF", "#FFFFFF", "#000000"), "Jost-Black.ttf", false, COMIC_OUTLINE, true));
@@ -115,7 +115,7 @@ public class CaptionStyleCatalog {
                 colors("#FFFFFF", "#2979FF", "#2979FF", "#000000"), "All-Genders-Regular-v4.otf", false, PLAIN, true));
 
         list.add(style("SOFT_CARD_SHADOW", "Soft Card Shadow", cats(FEATURED),
-                colors("#FFFFFF", "#FFFFFF", "#EFEFEF", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
+                colors("#0A0A0F", "#FFFFFF", "#EFEFEF", "#000000"), "All-Genders-Regular-v4.otf", false, BOX_TRANSLUCENT, true));
 
         list.add(style("CORNER_ROUNDED_HIGHLIGHT", "Corner Rounded Highlight", cats(FEATURED),
                 colors("#FFD400", "#000000", "#FFFFFF", "#000000"), "Jost-Black.ttf", false, BOX_SOLID, true));
@@ -134,7 +134,7 @@ public class CaptionStyleCatalog {
                 colors("#FFFFFF", "#8BC34A", "#8BC34A", "#7B2FF7"), "All-Genders-Regular-v4.otf", true, PLAIN, false));
 
         list.add(style("COLOR_SPLASH", "Color Splash", cats(VIRAL),
-                colors("#000000", "#FFFFFF", "#FFFFFF", "#E91E63"), "All-Genders-Regular-v4.otf", true, ROTATED_MARKER, false));
+                colors("#000000", "#FFFFFF", "#FFFFFF", "#5C0926"), "All-Genders-Regular-v4.otf", true, ROTATED_MARKER, false));
 
         list.add(style("ZIGZAG_CALLIGRAPHY", "Zigzag Calligraphy", cats(VIRAL),
                 colors("#FFFFFF", "#FFFFFF", "#FFFFFF", "#000000"), "Calligrapher-JRxaE.ttf", true, PLAIN, false));
@@ -155,7 +155,7 @@ public class CaptionStyleCatalog {
                 colors("#FF3B30", "#FFD400", "#8BC34A", "#2979FF"), "SoulDaisy.otf", false, PLAIN, true));
 
         list.add(style("MARKER_HIGHLIGHT_ROTATE", "Marker Highlight Rotate", cats(VIRAL),
-                colors("#000000", "#FFFFFF", "#FFFFFF", "#E91E63"), "All-Genders-Regular-v4.otf", false, ROTATED_MARKER, true));
+                colors("#000000", "#FFFFFF", "#FFFFFF", "#5C0926"), "All-Genders-Regular-v4.otf", false, ROTATED_MARKER, true));
 
         list.add(style("COMIC_BOUNCE_OUTLINE", "Comic Bounce Outline", cats(VIRAL),
                 colors("#FFEB3B", "#000000", "#FFFFFF", "#000000"), "ChauPhilomeneOne-Regular.ttf", false, COMIC_OUTLINE, true));
@@ -197,7 +197,7 @@ public class CaptionStyleCatalog {
                 colors("#FF3B30", "#FFFFFF", "#FFFFFF", "#7B2FF7"), "All-Genders-Regular-v4.otf", false, PLAIN, true));
 
         list.add(style("MEGA_BOLD_CAPS", "Mega Bold Caps", cats(VIRAL),
-                colors("#FFFFFF", "#FFD400", "#FFD400", "#000000"), "Jost-Black.ttf", false, BOX_SOLID, true));
+                colors("#050505", "#FFD400", "#FFD400", "#000000"), "Jost-Black.ttf", false, BOX_SOLID, true));
 
         list.add(style("WAVY_BASELINE", "Wavy Baseline", cats(VIRAL),
                 colors("#FFFFFF", "#FF6EC7", "#FF6EC7", "#000000"), "Calligrapher-JRxaE.ttf", false, PLAIN, true));

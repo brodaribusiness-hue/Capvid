@@ -2,26 +2,53 @@ name: Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
 
+# whisper.cpp is a git submodule pinned to an exact commit, so the build is
+# reproducible from the repository alone. There is deliberately no
+# "git clone whisper.cpp" step here any more: cloning an unpinned `main` meant
+# CI could build something that no local checkout could reproduce, and that a
+# breaking upstream change would land in the build with no diff in this repo.
+
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    # Needed so the failure-reporting step can post the build output as a pull
+    # request comment. Runner log archives are served from
+    # results-receiver.actions.githubusercontent.com, which is not reachable
+    # from every network; the REST API is.
+    permissions:
+      contents: read
+      pull-requests: write
 
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
+    # pipefail is essential here: several steps pipe Gradle into `tee`, and
+    # without it the step would report the exit status of `tee` (always 0) and a
+    # failed build would look like a pass.
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (with pinned submodules)
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
 
-      - name: Clone whisper.cpp into cpp source tree
+      - name: Verify the pinned whisper.cpp source is present
         run: |
-          rm -rf app/src/main/cpp/whisper
-          git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git app/src/main/cpp/whisper
+          set -e
+          test -f app/src/main/cpp/whisper/include/whisper.h \
+            || { echo "::error::whisper.cpp submodule is not populated. Run: git submodule update --init --recursive"; exit 1; }
+          echo "whisper.cpp present at commit $(git submodule status app/src/main/cpp/whisper)"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -29,27 +56,174 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # `yes | sdkmanager` must NOT run under pipefail: `yes` is killed by
+      # SIGPIPE when sdkmanager closes the pipe and exits 141, which pipefail
+      # would report as a failure. The pipeline's real status is sdkmanager's.
       - name: Accept Android SDK licenses
+        shell: bash
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT || true
 
-      - name: Install required SDK platform / build-tools / NDK / CMake
+      - name: Install SDK platform, build-tools, NDK and CMake
+        shell: bash
         run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "ndk;26.1.10909125" \
-            "cmake;3.22.1"
+          SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          LOG=/tmp/sdk-install.log
+          : > "$LOG"
+          echo "--- disk before ---" >> "$LOG"
+          df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
 
-      - name: Set up Gradle (no wrapper present in repo)
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.5'
+          set +e
+          for pkg in "platforms;android-34" "build-tools;34.0.0" "platform-tools" "cmake;3.22.1" "ndk;26.1.10909125"; do
+            echo "===== installing: $pkg =====" >> "$LOG"
+            yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$pkg" >> "$LOG" 2>&1
+            echo "===== $pkg -> sdkmanager exit $? =====" >> "$LOG"
+          done
+          echo "--- disk after ---" >> "$LOG"
+          df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
+          set -e
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+          # sdkmanager exits 1 even after installing successfully: on the
+          # ubuntu-latest runner it returned 1 for cmake;3.22.1 and
+          # ndk;26.1.10909125 after printing "Install ... finished." (and after
+          # 2 GB landed on disk), and 1 for platform-tools when it was already
+          # present. Its exit status is therefore not used to decide success;
+          # what is actually on disk is.
+          missing=0
+          for dir in platforms/android-34 build-tools/34.0.0 platform-tools cmake/3.22.1 ndk/26.1.10909125; do
+            if [ -d "$ANDROID_SDK_ROOT/$dir" ]; then
+              echo "OK      $dir"
+            else
+              echo "MISSING $dir"
+              missing=1
+            fi
+          done
 
-      - name: Upload APK artifact
+          tr '\r' '\n' < "$LOG" | grep -vE "^\[[ =]*\] *[0-9]+%" > /tmp/sdk.clean.log || true
+          mv /tmp/sdk.clean.log "$LOG"
+          tail -n 60 "$LOG"
+          exit $missing
+
+      - name: Static contract audit
+        run: |
+          python3 -m pip install --quiet fonttools
+          python3 tools/audit_static.py
+
+      # Reads the palette hex literals straight out of CaptionStyleCatalog and
+      # scores every template against the worst frame it could ever sit on.
+      # This is the catalog-wide half of the contrast check; the JVM unit tests
+      # cannot do it because android.graphics.Color is a stub there and every
+      # catalog colour comes back as 0.
+      - name: Caption contrast audit (all templates vs. worst-case footage)
+        run: python3 tools/audit_contrast.py
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Unit tests (caption layout + ASS generation)
+        run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee /tmp/gradle-test.log
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace 2>&1 | tee /tmp/gradle-lint.log || echo "::warning::lint reported findings"
+
+      - name: Build debug APK (compiles the native whisper.cpp bridge)
+        run: ./gradlew assembleDebug --stacktrace 2>&1 | tee /tmp/gradle-debug.log
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace 2>&1 | tee /tmp/gradle-release.log
+
+      # Runner log files are served from a host that is not always reachable, so
+      # the failure detail is also published to the job summary, which the
+      # check-runs API returns directly.
+      - name: Publish compiler output on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # errexit/pipefail off: this step only reports, it must never fail and
+          # hide the original error (grep exits 1 when it matches nothing).
+          set +e
+          set +o pipefail
+          BODY=/tmp/failure-comment.md
+          {
+            echo "### CI failure - captured output (run ${GITHUB_RUN_ID})"
+            found=0
+            for f in /tmp/*.log; do
+              [ -f "$f" ] || continue
+              found=1
+              echo ""
+              echo "#### $f"
+              # Gradle prints "FAILURE / What went wrong / error:" BEFORE the long
+              # --stacktrace dump, so the head and a grep of the error lines are
+              # what actually matter; the tail alone shows only stack frames.
+              echo '```'
+              echo "--- first 150 lines ---"
+              head -n 150 "$f"
+              echo ""
+              echo "--- error lines ---"
+              grep -nE "error:|error;|FAILURE|What went wrong|Caused by:|\.java:[0-9]+|Execution failed|> Task .* FAILED|BUILD FAILED" "$f" | head -100
+              echo ""
+              echo "--- last 40 lines ---"
+              tail -n 40 "$f"
+              echo '```'
+            done
+            [ "$found" -eq 1 ] || echo "No logs were captured in /tmp."
+          } | tee "$GITHUB_STEP_SUMMARY" > "$BODY"
+
+          # The runner log archive lives on a host that is not reachable from
+          # every network, so the same output is posted to the pull request,
+          # where it can be read through the REST API.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "$GITHUB_REPOSITORY" --body-file "$BODY"
+          fi
+          exit 0
+
+      - name: Verify the native library was built for both ABIs
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          echo "APK: $APK ($(du -h "$APK" | cut -f1))"
+          echo "--- all native libs in the APK ---"
+          unzip -l "$APK" | grep -E "lib/.*\.so" || echo "(none found)"
+          echo "---"
+          for abi in arm64-v8a armeabi-v7a; do
+            unzip -l "$APK" | grep -q "lib/$abi/libcapvid_native.so" \
+              || { echo "::error::libcapvid_native.so missing for $abi"; exit 1; }
+            echo "OK lib/$abi/libcapvid_native.so"
+          done
+
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: capvid-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+
+      - name: Report unit test results
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Always reports, so a green run also shows which tests actually ran.
+          set +e
+          set +o pipefail
+          BODY=/tmp/test-report.md
+          {
+            echo "### Unit test results (run ${GITHUB_RUN_ID})"
+            echo ""
+            python3 tools/junit_summary.py app/build/test-results/testDebugUnitTest
+          } > "$BODY" 2>&1
+          cat "$BODY"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "$GITHUB_REPOSITORY" --body-file "$BODY"
+          fi
+          exit 0

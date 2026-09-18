@@ -73,7 +73,9 @@ public class TemplatePickerBottomSheet extends BottomSheetDialogFragment {
     // fonts panel
     private RecyclerView fontList;
     private TextView chipAlignLeft, chipAlignCenter, chipAlignRight;
-    private SeekBar seekLineSpacing, seekWordSpacing;
+    private SeekBar seekLineSpacing, seekWordSpacing, seekTextSize;
+    private TextView textSizeValue;
+    private TextView chipBold, chipItalic;
     private TextView chipCapNone, chipCapUpper, chipCapLower, chipCapTitle;
 
     // breaks panel
@@ -287,12 +289,34 @@ public class TemplatePickerBottomSheet extends BottomSheetDialogFragment {
         chipCapUpper = p.findViewById(R.id.chipCapUpper);
         chipCapLower = p.findViewById(R.id.chipCapLower);
         chipCapTitle = p.findViewById(R.id.chipCapTitle);
+        seekTextSize = p.findViewById(R.id.seekTextSize);
+        textSizeValue = p.findViewById(R.id.textSizeValue);
+        chipBold = p.findViewById(R.id.chipBold);
+        chipItalic = p.findViewById(R.id.chipItalic);
 
         fontList.setLayoutManager(new LinearLayoutManager(requireContext(), RecyclerView.HORIZONTAL, false));
         String initialFont = options.fontAssetOverride != null ? options.fontAssetOverride : FontManager.FONT_FILES[0];
         FontListAdapter fontAdapter = new FontListAdapter(Arrays.asList(FontManager.FONT_FILES), initialFont,
                 asset -> options.fontAssetOverride = asset);
         fontList.setAdapter(fontAdapter);
+
+        // Text size and weight moved here from the preview screen, which used
+        // to carry a size spinner plus two checkboxes beside a style dropdown
+        // that duplicated this picker. One place for the whole look now.
+        applyTextSize((int) Math.round(options.textSizeSp));
+        seekTextSize.setOnSeekBarChangeListener(
+                simpleSeek(progress -> applyTextSize(MIN_TEXT_SIZE_SP + Math.round(progress))));
+
+        setChipSelected(chipBold, options.bold);
+        setChipSelected(chipItalic, options.italic);
+        chipBold.setOnClickListener(v -> {
+            options.bold = !options.bold;
+            setChipSelected(chipBold, options.bold);
+        });
+        chipItalic.setOnClickListener(v -> {
+            options.italic = !options.italic;
+            setChipSelected(chipItalic, options.italic);
+        });
 
         selectAlignment(options.alignment);
         chipAlignLeft.setOnClickListener(v -> selectAlignment(CaptionStyleOptions.Alignment.LEFT));
@@ -310,6 +334,18 @@ public class TemplatePickerBottomSheet extends BottomSheetDialogFragment {
         chipCapUpper.setOnClickListener(v -> selectCapitalization(CaptionStyleOptions.Capitalization.UPPERCASE));
         chipCapLower.setOnClickListener(v -> selectCapitalization(CaptionStyleOptions.Capitalization.LOWERCASE));
         chipCapTitle.setOnClickListener(v -> selectCapitalization(CaptionStyleOptions.Capitalization.TITLECASE));
+    }
+
+    /** Smallest text size the slider offers, in sp. */
+    private static final int MIN_TEXT_SIZE_SP = 8;
+    /** Largest. The slider's max is (MAX - MIN), so 24 steps of 1sp. */
+    private static final int MAX_TEXT_SIZE_SP = 32;
+
+    private void applyTextSize(int sp) {
+        int clamped = Math.max(MIN_TEXT_SIZE_SP, Math.min(MAX_TEXT_SIZE_SP, sp));
+        options.textSizeSp = clamped;
+        if (seekTextSize != null) seekTextSize.setProgress(clamped - MIN_TEXT_SIZE_SP);
+        if (textSizeValue != null) textSizeValue.setText(clamped + " sp");
     }
 
     private void selectAlignment(CaptionStyleOptions.Alignment a) {

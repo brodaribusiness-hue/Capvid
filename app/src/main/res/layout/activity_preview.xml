@@ -138,7 +138,7 @@
                 android:layout_height="wrap_content"
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp"
-                android:text="Scale: 100%" />
+                android:text="Preview zoom: 100%" />
 
             <com.google.android.material.slider.Slider
                 android:id="@+id/scaleSlider"
@@ -167,59 +167,6 @@
             app:strokeColor="@color/purple_primary"
             app:strokeWidth="1dp"
             app:cornerRadius="24dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Caption Style"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <Spinner
-            android:id="@+id/styleSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:popupBackground="@color/surface_dark" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Text Size"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
-
-        <Spinner
-            android:id="@+id/sizeSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
-            android:popupBackground="@color/surface_dark" />
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:orientation="horizontal">
-
-            <CheckBox
-                android:id="@+id/checkBold"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:buttonTint="@color/purple_accent"
-                android:textColor="@color/text_primary"
-                android:text="Bold" />
-
-            <CheckBox
-                android:id="@+id/checkItalic"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:buttonTint="@color/purple_accent"
-                android:textColor="@color/text_primary"
-                android:text="Italic" />
-
-        </LinearLayout>
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnExport"

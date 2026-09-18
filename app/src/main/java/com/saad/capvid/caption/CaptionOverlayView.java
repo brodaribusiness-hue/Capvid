@@ -21,9 +21,7 @@ import com.saad.capvid.style.CaptionStyleOptions;
 import com.saad.capvid.style.renderer.ModernCaptionRenderer;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
-import java.util.Random;
 
 public class CaptionOverlayView extends View {
 
@@ -50,9 +48,6 @@ public class CaptionOverlayView extends View {
         SINGLE_WORD_FLASH, NEON_PULSE_TEXT, HYPE_BOUNCE_GLOW, TURBO_SHAKE_POP
     }
 
-    private static final int WORDS_PER_LINE = 4;
-    private static final float WORD_SPACING = 22f;
-
     private List<CaptionWord> words;
     private List<List<CaptionWord>> lineGroups = new ArrayList<>();
     private long currentTimeMs = 0;
@@ -77,6 +72,17 @@ public class CaptionOverlayView extends View {
     private float dragStartX, dragStartY;
     private boolean dragging = false;
 
+    /**
+     * Display dimensions of the video being previewed, used to work out where
+     * the letterboxed picture actually sits inside this view. Zero until the
+     * player reports them, in which case the whole view is used.
+     */
+    private int videoDisplayWidth = 0;
+    private int videoDisplayHeight = 0;
+
+    /** Recomputed once per frame in onDraw, reused by drawLine. */
+    private CaptionFrameGeometry.Rect frameRect = new CaptionFrameGeometry.Rect(0f, 0f, 1f, 1f);
+
     public CaptionOverlayView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setLayerType(LAYER_TYPE_SOFTWARE, null);
@@ -91,16 +97,27 @@ public class CaptionOverlayView extends View {
 
     public void setWords(List<CaptionWord> words) { this.words = words; regroupLines(); invalidate(); }
     public void setCurrentTimeMs(long timeMs) { this.currentTimeMs = timeMs; invalidate(); }
-    public void setStyleType(CaptionStyleType type) { this.styleType = type; invalidate(); }
+    public void setStyleType(CaptionStyleType type) { this.styleType = type; colourMapping = null; invalidate(); }
     public CaptionStyleType getStyleType() { return styleType; }
 
-    public void setStyleOptions(CaptionStyleOptions o) { this.options = o; regroupLines(); invalidate(); }
+    public void setStyleOptions(CaptionStyleOptions o) { this.options = o; colourMapping = null; regroupLines(); invalidate(); }
     public CaptionStyleOptions getStyleOptions() { return options; }
 
     public void setBold(boolean bold) { this.bold = bold; invalidate(); }
     public void setItalic(boolean italic) { this.italic = italic; invalidate(); }
     public boolean getBold() { return bold; }
     public boolean getItalic() { return italic; }
+
+    /**
+     * Restores a saved caption position (see Project.posXFraction/posYFraction).
+     * There was no setter before, so a dragged caption position could never be
+     * persisted or restored.
+     */
+    public void setPositionFractions(float xFraction, float yFraction) {
+        this.posXFraction = Math.max(0.1f, Math.min(0.9f, xFraction));
+        this.posYFraction = Math.max(0.1f, Math.min(0.9f, yFraction));
+        invalidate();
+    }
 
     public void setTextSizeSp(float sp) {
         this.textSizeSp = sp;
@@ -113,6 +130,69 @@ public class CaptionOverlayView extends View {
     public float getPosXFraction() { return posXFraction; }
     public float getPosYFraction() { return posYFraction; }
 
+    /**
+     * Tells the overlay the video's display dimensions so the caption can be
+     * anchored to the picture rather than to the screen. {@code VideoView}
+     * letterboxes the video inside its {@code match_parent} bounds, and this
+     * overlay is a {@code match_parent} sibling of it, so without this the
+     * caption is positioned as a fraction of the screen while the burn-in
+     * positions it as a fraction of the video - two different places.
+     */
+    public void setVideoDisplaySize(int widthPx, int heightPx) {
+        if (widthPx == videoDisplayWidth && heightPx == videoDisplayHeight) return;
+        videoDisplayWidth = Math.max(0, widthPx);
+        videoDisplayHeight = Math.max(0, heightPx);
+        invalidate();
+    }
+
+    /**
+     * Where the video sits inside this view, in view pixels. Everything the
+     * exporter needs to reproduce the on-screen placement is derivable from
+     * this, which is why it is exposed rather than the individual fields.
+     */
+    public CaptionFrameGeometry.Rect getVideoRect() {
+        return CaptionFrameGeometry.fittedVideoRect(
+                getWidth(), getHeight(), videoDisplayWidth, videoDisplayHeight);
+    }
+
+    // ------------------------------------------------------------------
+    // Metrics the exporter needs in order to place the burned-in caption
+    // where the preview actually puts it. Without these the export had to
+    // guess (the old code multiplied the sp size by a magic 2.5f), so the
+    // caption came out a different size and a different height in the video
+    // than on screen.
+    // ------------------------------------------------------------------
+
+    /** Rendered text size in device pixels. */
+    public float getTextSizePx() {
+        return textPaint.getTextSize();
+    }
+
+    /** Distance between two consecutive baselines, in device pixels. */
+    public float getLineHeightPx() {
+        return textPaint.getTextSize() + options.lineSpacingPx;
+    }
+
+    /**
+     * Signed distance from the text BASELINE to the vertical CENTRE of the
+     * glyphs, in device pixels (negative: the centre sits above the baseline).
+     *
+     * <p>Android's {@code Canvas.drawText} anchors on the baseline, whereas
+     * libass's {@code \an5} anchor is the vertical centre of the line box. The
+     * exporter adds this to the preview's baseline Y so the two land on the same
+     * spot. Measured with the style typeface active, because ascent/descent are
+     * font-specific.
+     */
+    public float getBaselineToCenterPx() {
+        applyStyleFont();
+        try {
+            Paint.FontMetrics fm = textPaint.getFontMetrics();
+            return (fm.ascent + fm.descent) / 2f;
+        } finally {
+            resetFont();
+        }
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -121,8 +201,12 @@ public class CaptionOverlayView extends View {
         if (activeIndex == -1) return;
 
         float progress = getProgress(words.get(activeIndex));
-        float cx = posXFraction * getWidth();
-        float cy = posYFraction * getHeight();
+        // Caption position is expressed as a fraction of the VIDEO FRAME, not of
+        // this view - the exporter only knows the video, so both sides have to
+        // mean the same thing. Convert through the letterboxed rect.
+        frameRect = getVideoRect();
+        float cx = CaptionFrameGeometry.videoFractionXToView(frameRect, posXFraction);
+        float cy = CaptionFrameGeometry.videoFractionYToView(frameRect, posYFraction);
 
         if (styleType == CaptionStyleType.ZIGZAG_CALLIGRAPHY) {
             drawZigzagCalligraphy(canvas, activeIndex, cx, cy);
@@ -139,18 +223,29 @@ public class CaptionOverlayView extends View {
         windowStart = Math.max(0, Math.min(windowStart, Math.max(0, lineGroups.size() - pages)));
         int windowEnd = Math.min(lineGroups.size(), windowStart + pages);
 
+        // The whole caption block is drawn in the selected style font, which is
+        // also the single font the exported .ass Style specifies. Measuring and
+        // drawing therefore both have to happen with that typeface active:
+        // previously only the ACTIVE word was switched to the style font, so the
+        // surrounding context words were measured AND drawn in the default font.
+        // That made the per-word advance widths wrong (words overlapped or gapped
+        // incorrectly whenever the style font differed in width from the system
+        // font) and made the preview disagree with the burn-in.
         applyStyleFont();
-        float lineHeight = textPaint.getTextSize() + options.lineSpacingPx;
-        resetFont();
+        try {
+            float lineHeight = textPaint.getTextSize() + options.lineSpacingPx;
 
-        // Caption background spans the whole visible block (all pageBreakLines)
-        if (options.captionBgOn) {
-            drawCaptionBackground(canvas, cx, cy, windowStart, windowEnd, lineHeight);
-        }
+            // Caption background spans the whole visible block (all pageBreakLines)
+            if (options.captionBgOn) {
+                drawCaptionBackground(canvas, cx, cy, windowStart, windowEnd, lineHeight);
+            }
 
-        for (int li = windowStart; li < windowEnd; li++) {
-            float lineY = cy + (li - activeLine) * lineHeight;
-            drawLine(canvas, lineGroups.get(li), activeIndex, cx, lineY, progress);
+            for (int li = windowStart; li < windowEnd; li++) {
+                float lineY = cy + (li - activeLine) * lineHeight;
+                drawLine(canvas, lineGroups.get(li), activeIndex, cx, lineY, progress);
+            }
+        } finally {
+            resetFont();
         }
     }
 
@@ -163,8 +258,12 @@ public class CaptionOverlayView extends View {
 
         float x;
         switch (options.alignment) {
-            case LEFT: x = getWidth() * 0.06f; break;
-            case RIGHT: x = getWidth() * 0.94f - totalWidth; break;
+            // The 6% / 94% insets are fractions of the VIDEO, matching the
+            // \an4 / \an6 x positions AssSubtitleBuilder writes. Using the view
+            // width here put the caption outside the picture whenever the video
+            // was pillarboxed.
+            case LEFT: x = frameRect.left + frameRect.width * 0.06f; break;
+            case RIGHT: x = frameRect.left + frameRect.width * 0.94f - totalWidth; break;
             case CENTER:
             default: x = cx - totalWidth / 2f; break;
         }
@@ -176,7 +275,10 @@ public class CaptionOverlayView extends View {
             boolean isActive = words.indexOf(w) == activeIndex;
 
             if (isActive) {
-                applyStyleFont();
+                // NOTE: no applyStyleFont()/resetFont() here any more - onDraw()
+                // holds the style typeface for the whole block so that the
+                // measureText() calls above and the context words below are all
+                // measured and drawn in the same font.
                 applyShadow(textPaint);
                 if (options.activeWordBgOn) {
                     drawActiveWordBackground(canvas, text, wordCenterX, cy);
@@ -186,10 +288,9 @@ public class CaptionOverlayView extends View {
                     drawStrokePass(canvas, text, wordCenterX, cy);
                 }
                 textPaint.clearShadowLayer();
-                resetFont();
             } else {
                 Paint contextPaint = new Paint(textPaint);
-                contextPaint.setColor(Color.argb(190, 255, 255, 255));
+                contextPaint.setColor(contextColor());
                 contextPaint.clearShadowLayer();
                 contextPaint.setMaskFilter(null);
                 contextPaint.setShader(null);
@@ -264,51 +365,19 @@ public class CaptionOverlayView extends View {
 
     /**
      * Splits the flat word list into display lines according to
-     * options.lineBreakMode. Called whenever words or lineBreakMode change.
-     * PUNCTUATION: a line ends at a word ending in . ! ? , (or WORDS_PER_LINE
-     * words, whichever comes first) — same visual cadence as the original
-     * fixed 4-words-per-line behaviour, but break-aware.
-     * SINGLE_WORD: one word per line.
-     * RANDOM: pseudo-random 2-5 word groups (stable seed so it doesn't
-     * re-shuffle every recompose).
+     * options.lineBreakMode. The rules themselves live in
+     * {@link CaptionLayout#group} because the exported .ass file must produce
+     * exactly the same lines as this preview.
      */
     private void regroupLines() {
-        lineGroups = new ArrayList<>();
-        if (words == null || words.isEmpty()) return;
-
-        switch (options.lineBreakMode) {
-            case SINGLE_WORD:
-                for (CaptionWord w : words) lineGroups.add(Collections.singletonList(w));
-                break;
-
-            case RANDOM: {
-                Random rnd = new Random(42);
-                int i = 0;
-                while (i < words.size()) {
-                    int len = 2 + rnd.nextInt(4);
-                    int end = Math.min(words.size(), i + len);
-                    lineGroups.add(new ArrayList<>(words.subList(i, end)));
-                    i = end;
-                }
-                break;
-            }
-
-            case PUNCTUATION:
-            default: {
-                List<CaptionWord> current = new ArrayList<>();
-                for (CaptionWord w : words) {
-                    current.add(w);
-                    String t = w.text == null ? "" : w.text.trim();
-                    boolean endsPunctuation = t.matches(".*[.!?,]$");
-                    if (endsPunctuation || current.size() >= WORDS_PER_LINE) {
-                        lineGroups.add(current);
-                        current = new ArrayList<>();
-                    }
-                }
-                if (!current.isEmpty()) lineGroups.add(current);
-                break;
-            }
-        }
+        // Delegates to CaptionLayout - the SAME grouping the exported .ass file
+        // is built from. Keeping this logic in one place is what stops the
+        // preview and the burn-in from showing different line breaks.
+        List<CaptionLayout.Line> lines =
+                CaptionLayout.group(words, options.lineBreakMode, CaptionLayout.DEFAULT_WORDS_PER_LINE);
+        List<List<CaptionWord>> groups = new ArrayList<>(lines.size());
+        for (CaptionLayout.Line line : lines) groups.add(line.words);
+        lineGroups = groups;
     }
 
     private int lineIndexOf(int wordIndex) {
@@ -329,6 +398,41 @@ public class CaptionOverlayView extends View {
         textPaint.setTextSkewX(italic ? -0.25f : 0f);
     }
 
+    /**
+     * The exact colour mapping the exporter uses, so the preview and the
+     * burn-in cannot disagree about what a template looks like.
+     *
+     * <p>The hand-written drawXxx() methods below used to hardcode their own
+     * accents - Color.YELLOW, Color.RED, Color.rgb(0, 191, 255) and so on -
+     * which matched neither the catalog palette nor the user's Color tab
+     * settings. The export always derived its colours from
+     * CaptionStyleCatalog.swatchColors plus options.activeWordColor, so for
+     * those ~20 templates the preview showed one colour and the video another.
+     */
+    private com.saad.capvid.export.StyleAssMapper.Mapping colourMapping;
+
+    private com.saad.capvid.export.StyleAssMapper.Mapping mapping() {
+        if (colourMapping == null) {
+            colourMapping = com.saad.capvid.export.StyleAssMapper.map(styleType.name(), options);
+        }
+        return colourMapping;
+    }
+
+    /** The colour the ACTIVE word is painted in. */
+    private int activeColor() {
+        return mapping().primaryColor;
+    }
+
+    /** The colour the surrounding words are painted in. */
+    private int contextColor() {
+        return mapping().secondaryColor;
+    }
+
+    /** The glow/halo colour, for the styles that have one. */
+    private int glowColor() {
+        return mapping().glowColor;
+    }
+
     private void resetFont() {
         textPaint.setTypeface(defaultTypeface);
         textPaint.setFakeBoldText(false);
@@ -336,6 +440,13 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawActiveStyle(Canvas canvas, CaptionWord w, float x, float y, float progress) {
+        // Set the active colour on entry rather than relying on whatever the
+        // previous effect left behind. Several of the drawXxx() methods below
+        // - drawMinimalFade among them - never set a colour at all and were
+        // painting the active word in the Color.WHITE that the last reset
+        // happened to leave in the paint, whatever the template or the user's
+        // Color tab said.
+        textPaint.setColor(activeColor());
         switch (styleType) {
             case MINIMAL_FADE: drawMinimalFade(canvas, w, x, y, progress); break;
             case KARAOKE_HIGHLIGHT: drawKaraokeHighlight(canvas, w, x, y, progress); break;
@@ -385,19 +496,9 @@ public class CaptionOverlayView extends View {
     }
 
     private int findActiveWordIndex() {
-        if (words == null || words.isEmpty()) return -1;
-        if (currentTimeMs < words.get(0).startMs) return -1;
-        // A word stays "active" from its own start until the NEXT word's start
-        // (not just until its own endMs). Whisper timestamps almost always leave
-        // a small gap between words, and the old exact-window check meant no
-        // caption was drawn at all during every such gap. The last word gets a
-        // short trailing buffer instead of a "next start" to fall back on.
-        for (int i = 0; i < words.size(); i++) {
-            CaptionWord w = words.get(i);
-            long segmentEnd = (i < words.size() - 1) ? words.get(i + 1).startMs : w.endMs + 400;
-            if (currentTimeMs >= w.startMs && currentTimeMs < segmentEnd) return i;
-        }
-        return words.size() - 1;
+        // Shared with the exporter via CaptionLayout so preview and burn-in
+        // agree on which word is "now".
+        return CaptionLayout.activeWordIndex(words, currentTimeMs);
     }
 
     private float getProgress(CaptionWord w) {
@@ -415,11 +516,11 @@ public class CaptionOverlayView extends View {
     private void drawKaraokeHighlight(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float textWidth = textPaint.measureText(w.text);
         float left = cx - textWidth / 2f;
-        textPaint.setColor(Color.GRAY);
+        textPaint.setColor(contextColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         canvas.save();
         canvas.clipRect(left, cy - textPaint.getTextSize(), left + textWidth * progress, cy + 10);
-        textPaint.setColor(Color.YELLOW);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         canvas.restore();
         textPaint.setColor(Color.WHITE);
@@ -430,17 +531,19 @@ public class CaptionOverlayView extends View {
         float padding = 14f;
 
         Paint boxPaint = new Paint(bgPaint);
-        boxPaint.setColor(Color.rgb(45, 0, 70));
+        boxPaint.setColor(options != null ? options.activeWordBgColor : Color.BLACK);
         boxPaint.setAlpha(230);
-        canvas.drawRect(cx - textWidth / 2f - padding, cy - textPaint.getTextSize(),
-                cx + textWidth / 2f + padding, cy + padding, boxPaint);
+        // The corner-radius option was dead here: drawRect has no radii.
+        float r = options != null ? options.activeWordBgCornerRadiusPx : 0f;
+        canvas.drawRoundRect(cx - textWidth / 2f - padding, cy - textPaint.getTextSize(),
+                cx + textWidth / 2f + padding, cy + padding, r, r, boxPaint);
 
-        textPaint.setColor(Color.rgb(120, 100, 0));
+        textPaint.setColor(mapping().outlineColor);
         canvas.drawText(w.text, cx + 3f, cy + 3f, textPaint);
         canvas.drawText(w.text, cx + 1.5f, cy + 1.5f, textPaint);
 
-        textPaint.setColor(Color.YELLOW);
-        textPaint.setShadowLayer(10f, 0, 0, Color.rgb(255, 230, 0));
+        textPaint.setColor(activeColor());
+        textPaint.setShadowLayer(10f, 0, 0, glowColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
         textPaint.setColor(Color.WHITE);
@@ -450,7 +553,7 @@ public class CaptionOverlayView extends View {
         float scale = progress < 0.5f ? 1f + 0.4f * (progress / 0.5f) : 1.4f - 0.4f * ((progress - 0.5f) / 0.5f);
         canvas.save();
         canvas.scale(scale, scale, cx, cy);
-        textPaint.setColor(Color.RED);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();
@@ -465,21 +568,21 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawGlowPop(Canvas canvas, CaptionWord w, float cx, float cy) {
-        textPaint.setShadowLayer(20f, 0, 0, Color.CYAN);
+        textPaint.setShadowLayer(20f, 0, 0, glowColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
     }
 
     private void drawColorSplash(Canvas canvas, CaptionWord w, float cx, float cy) {
         int[] colors = {Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.MAGENTA};
-        textPaint.setColor(colors[Math.abs(w.text.hashCode()) % colors.length]);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
 
     private void drawShadowPulse(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float radius = 10f + 15f * (float) Math.abs(Math.sin(progress * Math.PI));
-        textPaint.setColor(Color.rgb(255, 215, 0));
+        textPaint.setColor(activeColor());
         textPaint.setShadowLayer(radius, 0, 0, Color.BLACK);
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
@@ -487,7 +590,7 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawUnderlineDraw(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
-        textPaint.setColor(Color.rgb(0, 191, 255));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         float textWidth = textPaint.measureText(w.text);
         float left = cx - textWidth / 2f;
@@ -497,7 +600,7 @@ public class CaptionOverlayView extends View {
 
     private void drawSlideInCascade(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float slideOffset = (1f - Math.min(1f, progress * 3f)) * 200f;
-        textPaint.setColor(Color.rgb(0, 150, 60));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx - slideOffset, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
@@ -545,7 +648,7 @@ public class CaptionOverlayView extends View {
 
     private void drawBlurToFocus(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float blurRadius = Math.max(0.01f, 15f * (1f - progress));
-        textPaint.setColor(Color.rgb(255, 110, 199));
+        textPaint.setColor(activeColor());
         textPaint.setMaskFilter(new BlurMaskFilter(blurRadius, BlurMaskFilter.Blur.NORMAL));
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setMaskFilter(null);
@@ -563,7 +666,7 @@ public class CaptionOverlayView extends View {
         matrix.postTranslate(cx, cy);
         canvas.save();
         canvas.concat(matrix);
-        textPaint.setColor(Color.rgb(26, 35, 126));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();
@@ -587,7 +690,7 @@ public class CaptionOverlayView extends View {
         int alpha = progress < 0.05f ? (int) (255 * (progress / 0.05f)) : 255;
         canvas.save();
         canvas.scale(scale, scale, cx, cy);
-        textPaint.setColor(Color.rgb(176, 38, 255));
+        textPaint.setColor(activeColor());
         textPaint.setAlpha(alpha);
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setAlpha(255);
@@ -602,7 +705,7 @@ public class CaptionOverlayView extends View {
             float offset = (i + 1) * 4f;
             canvas.drawText(w.text, cx + offset, cy + offset, textPaint);
         }
-        textPaint.setColor(Color.rgb(255, 193, 7));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
@@ -633,7 +736,7 @@ public class CaptionOverlayView extends View {
         matrix.postTranslate(cx, cy);
         canvas.save();
         canvas.concat(matrix);
-        textPaint.setColor(Color.rgb(207, 245, 255));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();
@@ -649,8 +752,13 @@ public class CaptionOverlayView extends View {
                 if (dragging) {
                     float dx = event.getX() - dragStartX;
                     float dy = event.getY() - dragStartY;
-                    posXFraction = Math.max(0.1f, Math.min(0.9f, posXFraction + dx / getWidth()));
-                    posYFraction = Math.max(0.1f, Math.min(0.9f, posYFraction + dy / getHeight()));
+                    // Divide by the video rect, not the view: the fractions are
+                    // fractions of the picture, so a drag of N view pixels has to
+                    // move the caption by N / displayedVideoSize of the frame.
+                    float rw = Math.max(1f, frameRect.width);
+                    float rh = Math.max(1f, frameRect.height);
+                    posXFraction = Math.max(0.1f, Math.min(0.9f, posXFraction + dx / rw));
+                    posYFraction = Math.max(0.1f, Math.min(0.9f, posYFraction + dy / rh));
                     dragStartX = event.getX(); dragStartY = event.getY();
                     invalidate();
                 }
