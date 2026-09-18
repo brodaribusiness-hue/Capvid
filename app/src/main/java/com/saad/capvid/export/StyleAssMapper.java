@@ -297,45 +297,56 @@ public final class StyleAssMapper {
         }
     }
 
+    /**
+     * A one-line, honest description of how this style is burned in, shown in
+     * the UI while exporting so nobody mistakes the result for a pixel-perfect
+     * copy of the preview. Empty means "no known difference".
+     *
+     * <p>The per-style switch comes first because it is more specific than the
+     * per-treatment one: RAINBOW_CYCLE and GLITCH_FLICKER carry a treatment that
+     * already has a note, and their own note is the accurate one.
+     */
     public static String exportNotes(String styleId) {
         CaptionStyleDefinition def = CaptionStyleCatalog.byId(styleId);
         if (def == null) return "";
+
+        if (styleId != null) {
+            switch (styleId) {
+                case "BLUR_TO_FOCUS":
+                    return "Blur-in animated with a \\blur \\t ramp.";
+                case "GLITCH_FLICKER":
+                case "SHAKE_WIGGLE_EMPHASIS":
+                    return "Animated with chained \\t transforms.";
+                case "TILT_PERSPECTIVE_3D":
+                    return "Burned in as a static \\frx tilt.";
+                case "ROTATE_IN_3D_FLIP":
+                case "CUBE_ROTATE_3D":
+                    return "Animated with a \\fry transform; not a true 3D solid.";
+                case "DEPTH_STACK_3D":
+                    return "Stacked depth burned in flat.";
+                case "RAINBOW_CYCLE":
+                    return "Colour cycle burned in as static gradient bands; "
+                            + "animating \\1c would cancel the karaoke highlight.";
+                case "WAVY_BASELINE":
+                    return "Per-word baseline wave burned in flat - it needs "
+                            + "per-word positioning, which one line event cannot do.";
+                default:
+                    break;
+            }
+        }
+
         switch (def.treatment) {
             case GRADIENT_FILL:
-                return "Gradient burned in as 8 clipped colour bands.";
+                return "Gradient burned in as " + BAND_NOTE + " clipped colour bands.";
             case CHROME:
-                return "Metallic gradient burned in as 8 clipped colour bands.";
-            default:
-                break;
-        }
-        switch (styleId) {
-            case "CUBE_ROTATE_3D":
-            case "TILT_PERSPECTIVE_3D":
-            case "ROTATE_IN_3D_FLIP":
-            case "DEPTH_STACK_3D":
-                return "3D transform has no libass equivalent; burned in flat.";
-            case "BLUR_TO_FOCUS":
-                return "Blur-in animated with a \\blur \\t ramp.";
-            case "GLITCH_FLICKER":
-            case "SHAKE_WIGGLE_EMPHASIS":
-                return "Animated with chained \\t transforms.";
-            case "TILT_PERSPECTIVE_3D":
-                return "Burned in as a static \\frx tilt.";
-            case "ROTATE_IN_3D_FLIP":
-            case "CUBE_ROTATE_3D":
-                return "Animated with a \\fry transform; not a true 3D solid.";
-            case "RAINBOW_CYCLE":
-                return "Colour cycle burned in as a static gradient; animating "
-                        + "\\1c would cancel the per-word karaoke highlight.";
-            case "WAVY_BASELINE":
-                return "Per-word baseline wave burned in flat - it needs "
-                        + "per-word positioning, which one line event cannot do.";
-            case "DEPTH_STACK_3D":
-                return "Stacked depth burned in flat.";
+                return "Metallic gradient burned in as " + BAND_NOTE + " clipped colour bands.";
             default:
                 return "";
         }
     }
+
+    /** Kept in step with {@code AssSubtitleBuilder.GRADIENT_BANDS}. */
+    private static final String BAND_NOTE = "10";
 
     private static int withAlpha(int rgb, int alpha) {
         return Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));

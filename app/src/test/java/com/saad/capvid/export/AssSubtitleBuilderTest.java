@@ -396,6 +396,28 @@ public class AssSubtitleBuilderTest {
         }
     }
 
+    /**
+     * The UI shows exportNotes verbatim, and it names the band count. If
+     * GRADIENT_BANDS ever changes and the note does not, the app would describe
+     * its own output incorrectly - which is the exact failure mode this whole
+     * file exists to prevent.
+     */
+    @Test
+    public void theExportedNoteNamesTheRealBandCount() {
+        String note = StyleAssMapper.exportNotes("GRADIENT_TEXT");
+        assertTrue("note should mention the bands: " + note,
+                note.contains(String.valueOf(AssSubtitleBuilder.GRADIENT_BANDS)));
+
+        AssSubtitleBuilder.Request r = req();
+        r.styleId = "GRADIENT_TEXT";
+        int bands = 0;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            if (line.contains("\\clip(")) bands++;
+        }
+        // 3 lines, pageBreakLines 1, so one band stack per line
+        assertEquals(AssSubtitleBuilder.GRADIENT_BANDS, bands / 3);
+    }
+
     // ---- helpers -------------------------------------------------------
 
     private static String styleLine(String ass) {
