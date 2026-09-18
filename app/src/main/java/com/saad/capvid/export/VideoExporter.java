@@ -140,8 +140,10 @@ public class VideoExporter {
                     },
                     null,
                     statistics -> {
-                        // statistics.getTime() is milliseconds of input processed.
-                        long t = statistics.getTime();
+                        // Statistics.getTime() returns a double, in milliseconds of
+                        // input processed, so it has to be rounded before it can be
+                        // compared against the long inPoint/duration values below.
+                        long t = Math.round(statistics.getTime());
                         if (t >= 0) {
                             int pct = (int) Math.max(0, Math.min(100,
                                     ((t - inPoint) * 100L) / Math.max(1L, duration - inPoint)));
