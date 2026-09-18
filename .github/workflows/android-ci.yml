@@ -110,23 +110,28 @@ jobs:
       - name: Publish compiler output on failure
         if: failure()
         run: |
+          # errexit/pipefail off: this step only reports, it must never fail and
+          # hide the original error (grep exits 1 when it finds no match).
+          set +e
+          set +o pipefail
           {
-            echo "## Compiler / test output"
+            echo "## Build failure - captured output"
+            found=0
             for f in /tmp/*.log; do
               [ -f "$f" ] || continue
+              found=1
               echo ""
               echo "### $f"
               echo '```'
-              grep -nE "error:|error;|warning:|FAILURE|What went wrong|Caused by:|\.java:[0-9]+|Execution failed|> Task .* FAILED" "$f" | head -120
+              tail -n 200 "$f"
               echo '```'
-              echo "<details><summary>last 120 lines</summary>"
-              echo ""
-              echo '```'
-              tail -n 120 "$f"
-              echo '```'
-              echo "</details>"
             done
-          } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$found" -eq 0 ]; then
+              echo ""
+              echo "No logs were captured in /tmp."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY" 2>/dev/null
+          exit 0
 
       - name: Verify the native library was built for both ABIs
         run: |
