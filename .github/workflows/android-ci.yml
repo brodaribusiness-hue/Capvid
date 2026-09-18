@@ -53,10 +53,16 @@ jobs:
           git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git app/src/main/cpp/whisper
 
       - name: Assemble debug APK
-        run: gradle :app:assembleDebug --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace --console=plain 2>&1 | tail -250
 
       - name: Run JVM unit tests
-        run: gradle :app:test --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle :app:test --stacktrace --console=plain 2>&1 | tail -250
 
       - name: Create API 35 emulator
         shell: bash
