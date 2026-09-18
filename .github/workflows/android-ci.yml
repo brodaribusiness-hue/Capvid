@@ -67,31 +67,38 @@ jobs:
         shell: bash
         run: |
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          echo "sdkmanager path: $SDKM"
-          ls -la "$(dirname "$SDKM")" 2>&1 | head -20 || true
-          echo "--- cmdline-tools tree ---"
-          ls -la "$ANDROID_SDK_ROOT/cmdline-tools" 2>&1 | head -20 || true
-          echo "--- ANDROID_SDK_ROOT ---"; ls -la "$ANDROID_SDK_ROOT" 2>&1 | head -30 || true
-          echo "--- sdkmanager --version ---"
-          "$SDKM" --version 2>&1 | head -5 || true
-          echo "--- install ---"
-          set +e
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" \
-            "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "ndk;26.1.10909125" \
-            "cmake;3.22.1" > /tmp/sdk-install.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/sdk-install.log
-          echo "sdkmanager exit status: $status"
-          exit $status
+          LOG=/tmp/sdk-install.log
+          : > "$LOG"
+          {
+            echo "sdkmanager path : $SDKM"
+            echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+            echo "--- disk before ---"; df -h "$ANDROID_SDK_ROOT" 2>&1
+            echo "--- cmdline-tools ---"; ls -la "$ANDROID_SDK_ROOT/cmdline-tools" 2>&1
+            echo "--- already installed ---"; "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --list_installed 2>&1 | tail -40
+            echo "--- sdkmanager --version ---"; "$SDKM" --version 2>&1
+          } >> "$LOG" 2>&1
 
-      # Contract checks that a plain compile does not catch: package/directory
-      # consistency, R.* references, style catalog <-> enum coverage, JNI symbol
-      # matching, and - importantly - that every ASS family name we claim matches
-      # the real family name inside the bundled font file (a mismatch silently
-      # falls back to a default face in the exported video, with no error).
+          set +e
+          overall=0
+          # Installed one package at a time so a failure names the package.
+          for pkg in "platforms;android-34" "build-tools;34.0.0" "platform-tools" "cmake;3.22.1" "ndk;26.1.10909125"; do
+            echo "===== installing: $pkg =====" >> "$LOG"
+            yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --verbose "$pkg" >> "$LOG" 2>&1
+            rc=$?
+            echo "===== $pkg -> exit $rc =====" >> "$LOG"
+            echo "--- disk after $pkg ---" >> "$LOG"
+            df -h "$ANDROID_SDK_ROOT" >> "$LOG" 2>&1
+            [ "$rc" -eq 0 ] || overall=$rc
+          done
+          echo "overall exit: $overall" >> "$LOG"
+          set -e
+
+          # Strip the carriage-return progress bars so the log is readable.
+          tr '\r' '\n' < "$LOG" | grep -vE "^\[[ =]*\] *[0-9]+%" > /tmp/sdk-install.clean.log || true
+          mv /tmp/sdk-install.clean.log "$LOG"
+          cat "$LOG"
+          exit $overall
+
       - name: Static contract audit
         run: |
           python3 -m pip install --quiet fonttools
