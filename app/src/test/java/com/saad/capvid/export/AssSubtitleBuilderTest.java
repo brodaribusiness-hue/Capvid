@@ -10,6 +10,9 @@ import com.saad.capvid.style.CaptionStyleCatalog;
 import com.saad.capvid.style.CaptionStyleDefinition;
 import com.saad.capvid.style.CaptionStyleOptions;
 
+import android.graphics.Color;
+
+import org.junit.Assume;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -460,6 +463,7 @@ public class AssSubtitleBuilderTest {
 
     @Test
     public void noShadowEmitsNoShadowTags() {
+        assumeRealColours();
         AssSubtitleBuilder.Request r = req();
         r.options.shadowOn = false;
         for (String line : dialogues(AssSubtitleBuilder.build(r))) {
@@ -527,6 +531,29 @@ public class AssSubtitleBuilderTest {
     // ---- legibility ----------------------------------------------------
 
     /**
+     * android.graphics.Color is a no-op stub under JVM unit tests
+     * (returnDefaultValues = true), which makes Color.parseColor return 0 and
+     * every catalog colour black. A test that measures contrast off the catalog
+     * would then compare black against black, get 1.0, and either fail for a
+     * reason that has nothing to do with the code or - worse - pass vacuously.
+     * So those tests skip and say why. tools/audit_contrast.py does the same
+     * check for real: it reads the hex literals straight out of the catalog
+     * source, so the stub cannot reach it, and CI runs it.
+     */
+    private static void assumeRealColours() {
+        Assume.assumeTrue("android.graphics.Color is stubbed in JVM unit tests",
+                Color.parseColor("#FFFFFF") != 0);
+    }
+
+    private static StyleAssMapper.Mapping mappingWith(int fill, int outline) {
+        StyleAssMapper.Mapping m = new StyleAssMapper.Mapping();
+        m.primaryColor = fill;
+        m.outlineColor = outline;
+        m.borderStyle = 1;
+        return m;
+    }
+
+    /**
      * The point of the whole exercise: run every template in the catalog
      * through the real mapper and score the result against the worst frame it
      * will ever sit on. This is the same measurement tools/audit_contrast.py
@@ -534,6 +561,7 @@ public class AssSubtitleBuilderTest {
      */
     @Test
     public void everyTemplateStaysReadableOnTheWorstFrame() {
+        assumeRealColours();
         int checked = 0;
         for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
             StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
@@ -570,6 +598,7 @@ public class AssSubtitleBuilderTest {
 
     @Test
     public void aTemplateThatAlreadyReadsGetsNoLegibilityShadow() {
+        assumeRealColours();
         StyleAssMapper.Mapping m = StyleAssMapper.map("MINIMAL_FADE", null);
         assertEquals(0f, m.shadowY, 0.001f);
         assertEquals(0f, m.shadowX, 0.001f);
@@ -577,6 +606,7 @@ public class AssSubtitleBuilderTest {
 
     @Test
     public void aMidLuminanceTemplateGetsTheLegibilityShadow() {
+        assumeRealColours();
         StyleAssMapper.Mapping m = StyleAssMapper.map("PUNCH_IN", null);
         assertTrue("PUNCH_IN should have been given a shadow", m.shadowY != 0f);
         assertTrue(StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m))
@@ -590,6 +620,7 @@ public class AssSubtitleBuilderTest {
      */
     @Test
     public void noBoxStyleIsGivenALegibilityShadow() {
+        assumeRealColours();
         for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
             StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
             if (m.borderStyle == 3) {
@@ -606,6 +637,7 @@ public class AssSubtitleBuilderTest {
      */
     @Test
     public void theLegibilityShadowClearsTheOutline() {
+        assumeRealColours();
         int shifted = 0;
         for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
             StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
@@ -619,6 +651,62 @@ public class AssSubtitleBuilderTest {
             }
         }
         assertTrue("expected some templates to need the legibility shadow", shifted > 0);
+    }
+
+    @Test
+    public void legibilityLeavesASoundPaletteAlone() {
+        StyleAssMapper.Mapping m = mappingWith(0xFFFFFFFF, 0xFF000000);
+        StyleAssMapper.ensureLegible(m);
+        assertEquals(0f, m.shadowY, 0.001f);
+        assertEquals(0xFF000000, m.outlineColor);
+    }
+
+    @Test
+    public void legibilityAddsADarkShadowWhenTheBlockHasNoDarkElement() {
+        // White fill, white outline: readable on dark footage, invisible on
+        // light footage. The block needs a dark element.
+        StyleAssMapper.Mapping m = mappingWith(0xFFFFFFFF, 0xFFFFFFFF);
+        StyleAssMapper.ensureLegible(m);
+        assertEquals(StyleAssMapper.NEAR_BLACK, m.shadowColor);
+        assertEquals(0xFFFFFFFF, m.outlineColor);
+        assertTrue(StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m))
+                >= StyleAssMapper.MIN_WORST_CASE);
+    }
+
+    @Test
+    public void legibilityAddsALightShadowWhenTheBlockHasNoLightElement() {
+        // Red fill on a black outline: both dark, so nothing separates on dark
+        // footage. One extra colour cannot fix a mid-luminance fill, but a
+        // light shadow alongside the existing dark outline can.
+        StyleAssMapper.Mapping m = mappingWith(0xFFFF3B30, 0xFF000000);
+        StyleAssMapper.ensureLegible(m);
+        assertEquals(StyleAssMapper.NEAR_WHITE, m.shadowColor);
+        assertEquals(0xFF000000, m.outlineColor);
+        assertTrue(StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m))
+                >= StyleAssMapper.MIN_WORST_CASE);
+    }
+
+    @Test
+    public void legibilityRepaintsTheOutlineOnlyWhenBothItAndTheFillAreMid() {
+        // Red on blue: neither is light or dark, so no single added colour
+        // reaches the bar and the outline has to become the light element.
+        StyleAssMapper.Mapping m = mappingWith(0xFFFF3B30, 0xFF2979FF);
+        StyleAssMapper.ensureLegible(m);
+        assertEquals(StyleAssMapper.NEAR_WHITE, m.outlineColor);
+        assertEquals(StyleAssMapper.NEAR_BLACK, m.shadowColor);
+        assertTrue(StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m))
+                >= StyleAssMapper.MIN_WORST_CASE);
+    }
+
+    @Test
+    public void legibilityNeverTouchesABoxStyle() {
+        // BorderStyle 3: libass repaints the box in BackColour once a shadow
+        // offset exists (ass_render.c:2737), which would recolour the box.
+        StyleAssMapper.Mapping m = mappingWith(0xFFFFD400, 0xFFFFFFFF);
+        m.borderStyle = 3;
+        StyleAssMapper.ensureLegible(m);
+        assertEquals(0f, m.shadowY, 0.001f);
+        assertEquals(0xFFFFFFFF, m.outlineColor);
     }
 
     /** A user's own shadow choice still wins over the automatic one. */

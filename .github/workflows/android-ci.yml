@@ -108,6 +108,14 @@ jobs:
           python3 -m pip install --quiet fonttools
           python3 tools/audit_static.py
 
+      # Reads the palette hex literals straight out of CaptionStyleCatalog and
+      # scores every template against the worst frame it could ever sit on.
+      # This is the catalog-wide half of the contrast check; the JVM unit tests
+      # cannot do it because android.graphics.Color is a stub there and every
+      # catalog colour comes back as 0.
+      - name: Caption contrast audit (all templates vs. worst-case footage)
+        run: python3 tools/audit_contrast.py
+
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
 

@@ -123,11 +123,17 @@ public final class StyleAssMapper {
     /**
      * WCAG 2.x relative luminance. Alpha is ignored: a translucent colour has
      * no luminance of its own until it is composited over something.
+     *
+     * <p>The channels come out by bit shifting rather than through
+     * {@code android.graphics.Color}, whose methods are no-op stubs in the
+     * mockable android.jar that JVM unit tests run against. Going through Color
+     * made every colour black under test and every contrast ratio 1.0, which is
+     * how the first version of this quietly measured nothing at all.
      */
-    static float luminance(int rgb) {
-        return 0.2126f * channel(Color.red(rgb))
-             + 0.7152f * channel(Color.green(rgb))
-             + 0.0722f * channel(Color.blue(rgb));
+    static float luminance(int argb) {
+        return 0.2126f * channel((argb >> 16) & 0xFF)
+             + 0.7152f * channel((argb >> 8) & 0xFF)
+             + 0.0722f * channel(argb & 0xFF);
     }
 
     private static float channel(int v) {
@@ -165,7 +171,7 @@ public final class StyleAssMapper {
                     ? l * 12.92f
                     : 1.055f * (float) Math.pow(l, 1.0 / 2.4) - 0.055f;
             int level = Math.max(0, Math.min(255, Math.round(v * 255f)));
-            int frame = Color.rgb(level, level, level);
+            int frame = 0xFF000000 | (level << 16) | (level << 8) | level;
             float best = 0f;
             for (int c : colours) best = Math.max(best, contrast(c, frame));
             worst = Math.min(worst, best);
@@ -532,8 +538,9 @@ public final class StyleAssMapper {
         return "";
     }
 
+    /** Bit arithmetic, not Color.argb, so it survives the stubbed android.jar. */
     private static int withAlpha(int rgb, int alpha) {
-        return Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));
+        return ((alpha & 0xFF) << 24) | (rgb & 0x00FFFFFF);
     }
 
     private static String join(String a, String b) {
