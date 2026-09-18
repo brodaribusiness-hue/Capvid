@@ -82,6 +82,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           echo "no" | avdmanager create avd \
             --name capvid-api-35 \
             --package "system-images;android-35;google_apis;x86_64" \
@@ -92,6 +93,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
           nohup emulator -avd capvid-api-35 \
             -no-window -no-audio -no-boot-anim -no-snapshot \
             -gpu swiftshader_indirect > /tmp/capvid-emulator.log 2>&1 &
