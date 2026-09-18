@@ -195,4 +195,27 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
-          path: app/build/reports/tests/
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+
+      - name: Report unit test results
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Always reports, so a green run also shows which tests actually ran.
+          set +e
+          set +o pipefail
+          BODY=/tmp/test-report.md
+          {
+            echo "### Unit test results (run ${GITHUB_RUN_ID})"
+            echo ""
+            python3 tools/junit_summary.py app/build/test-results/testDebugUnitTest
+          } > "$BODY" 2>&1
+          cat "$BODY"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gh pr comment "${{ github.event.pull_request.number }}" \
+              --repo "$GITHUB_REPOSITORY" --body-file "$BODY"
+          fi
+          exit 0
