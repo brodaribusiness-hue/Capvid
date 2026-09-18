@@ -464,20 +464,49 @@ public class AssSubtitleBuilderTest {
         }
     }
 
+    /**
+     * req() defaults to SINGLE_WORD, where every line holds one word and there
+     * is no gap to export - so both of these need a line that actually has
+     * several words on it.
+     */
+    private static AssSubtitleBuilder.Request multiWordReq() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.lineBreakMode = CaptionStyleOptions.LineBreakMode.PUNCTUATION;
+        return r;
+    }
+
     @Test
     public void thePreviewWordSpacingReachesTheExport() {
-        AssSubtitleBuilder.Request r = req();
+        AssSubtitleBuilder.Request r = multiWordReq();
         r.options.wordSpacingPx = 22f;
-        String d = firstDialogue(AssSubtitleBuilder.build(r));
-        assertTrue("word spacing must be exported: " + d, d.contains("\\fsp"));
+        boolean sawTracking = false;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            if (line.contains("hello") && line.contains("there")) {
+                assertTrue("a multi-word line must carry the gap: " + line,
+                        line.contains("\\fsp"));
+                sawTracking = true;
+            }
+        }
+        assertTrue("expected a line with more than one word on it", sawTracking);
     }
 
     @Test
     public void zeroWordSpacingEmitsNoTrackingTag() {
-        AssSubtitleBuilder.Request r = req();
+        AssSubtitleBuilder.Request r = multiWordReq();
         r.options.wordSpacingPx = 0f;
         for (String line : dialogues(AssSubtitleBuilder.build(r))) {
             assertFalse("no tracking expected: " + line, line.contains("\\fsp"));
+        }
+    }
+
+    @Test
+    public void aSingleWordLineGetsNoTrackingTag() {
+        // Nothing to space out, so emitting \fsp would only shift the word.
+        AssSubtitleBuilder.Request r = req();
+        r.options.wordSpacingPx = 22f;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            assertFalse("single-word line must not be tracked: " + line,
+                    line.contains("\\fsp"));
         }
     }
 
