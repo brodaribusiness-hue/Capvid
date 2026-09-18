@@ -66,16 +66,40 @@ jobs:
         uses: gradle/actions/wrapper-validation@v4
 
       - name: Unit tests (caption layout + ASS generation)
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee /tmp/gradle-test.log
 
       - name: Lint
-        run: ./gradlew lintDebug --stacktrace || echo "::warning::lint reported findings"
+        run: ./gradlew lintDebug --stacktrace 2>&1 | tee /tmp/gradle-lint.log || echo "::warning::lint reported findings"
 
       - name: Build debug APK (compiles the native whisper.cpp bridge)
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace 2>&1 | tee /tmp/gradle-debug.log
 
       - name: Build release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace 2>&1 | tee /tmp/gradle-release.log
+
+      # Runner log files are served from a host that is not always reachable, so
+      # the failure detail is also published to the job summary, which the
+      # check-runs API returns directly.
+      - name: Publish compiler output on failure
+        if: failure()
+        run: |
+          {
+            echo "## Compiler / test output"
+            for f in /tmp/gradle-*.log; do
+              [ -f "$f" ] || continue
+              echo ""
+              echo "### $f"
+              echo '```'
+              grep -nE "error:|error;|warning:|FAILURE|What went wrong|Caused by:|\.java:[0-9]+|Execution failed|> Task .* FAILED" "$f" | head -120
+              echo '```'
+              echo "<details><summary>last 120 lines</summary>"
+              echo ""
+              echo '```'
+              tail -n 120 "$f"
+              echo '```'
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the native library was built for both ABIs
         run: |
