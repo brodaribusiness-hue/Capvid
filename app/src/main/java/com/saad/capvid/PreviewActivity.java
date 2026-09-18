@@ -625,6 +625,10 @@ public class PreviewActivity extends AppCompatActivity {
         final long duration = videoDurationMs;
 
         String fidelityNote = com.saad.capvid.export.StyleAssMapper.exportNotes(styleId);
+        String optionNote = com.saad.capvid.export.StyleAssMapper.optionNotes(optionsSnapshot);
+        if (!optionNote.isEmpty()) {
+            fidelityNote = fidelityNote.isEmpty() ? optionNote : fidelityNote + " " + optionNote;
+        }
         statusText.setText(fidelityNote.isEmpty() ? "Exporting... 0%" : "Exporting... 0% (" + fidelityNote + ")");
 
         activeExporter = new VideoExporter();

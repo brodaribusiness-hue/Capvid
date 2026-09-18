@@ -41,7 +41,19 @@ public final class StyleAssMapper {
         /** Shadow colour. */
         public int shadowColor = Color.argb(128, 0, 0, 0);
         public float outlineWidth = 2f;
-        public float shadowDepth = 0f;
+        /**
+         * Shadow offset on each axis, in preview pixels.
+         *
+         * <p>Kept as two values because the ASS Style has only ONE Shadow field
+         * and libass copies it to both axes ({@code ass_render.c:1105-1106}:
+         * {@code shadow_x = shadow_y = style->Shadow}). Writing the offset there
+         * turned the picker's "shadow direction: DOWN" into a diagonal
+         * down-right shadow in the export. {@code AssSubtitleBuilder} therefore
+         * leaves the Style field at 0 and emits {@code \xshad}/{@code \yshad},
+         * which are separate tags ({@code ass_parse.c:373,381}).
+         */
+        public float shadowX = 0f;
+        public float shadowY = 0f;
         /** ASS BorderStyle: 1 = outline+shadow, 3 = opaque box behind text. */
         public int borderStyle = 1;
         public boolean italic = false;
@@ -226,7 +238,12 @@ public final class StyleAssMapper {
 
         if (o.shadowOn) {
             m.shadowColor = o.shadowColor;
-            m.shadowDepth = Math.max(m.shadowDepth, o.shadowOffsetPx);
+            float d = o.shadowOffsetPx;
+            // The preview draws the shadow on ONE axis only (applyShadow sets
+            // dx for RIGHT and dy for DOWN, never both), so the export has to
+            // as well or the shadow lands in a different direction.
+            m.shadowX = o.shadowDirection == CaptionStyleOptions.ShadowDirection.RIGHT ? d : 0f;
+            m.shadowY = o.shadowDirection == CaptionStyleOptions.ShadowDirection.DOWN ? d : 0f;
         }
 
         if (o.captionBgOn) {
@@ -347,6 +364,26 @@ public final class StyleAssMapper {
 
     /** Kept in step with {@code AssSubtitleBuilder.GRADIENT_BANDS}. */
     private static final String BAND_NOTE = "10";
+
+    /**
+     * Options the user has switched on that the burn-in cannot reproduce, so the
+     * UI can say so instead of letting them discover it in the exported file.
+     *
+     * <p>Currently one: the active-word background box. The preview draws it
+     * with {@code Canvas.drawRoundRect} around the measured word. libass could
+     * draw an equivalent box with vector drawing commands, but only at a
+     * position it is told - and a karaoke line gives us no per-word x offsets,
+     * so there is nothing to anchor the box to.
+     *
+     * @return "" when every enabled option is exportable
+     */
+    public static String optionNotes(CaptionStyleOptions options) {
+        if (options == null) return "";
+        if (options.activeWordBgOn) {
+            return "Active-word background box is not burned in.";
+        }
+        return "";
+    }
 
     private static int withAlpha(int rgb, int alpha) {
         return Color.argb(alpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb));

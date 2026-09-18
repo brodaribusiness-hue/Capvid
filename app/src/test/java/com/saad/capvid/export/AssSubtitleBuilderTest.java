@@ -421,6 +421,77 @@ public class AssSubtitleBuilderTest {
         assertEquals(AssSubtitleBuilder.GRADIENT_BANDS, bands / 3);
     }
 
+    // ---- shadow direction and word spacing -----------------------------
+
+    /** The Style's single Shadow field must stay 0; the offset goes per event. */
+    @Test
+    public void theStyleShadowFieldIsAlwaysZero() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.shadowOn = true;
+        r.options.shadowOffsetPx = 6f;
+        // Shadow is field 18 of the V4+ Style line.
+        assertEquals("0.00", styleLine(AssSubtitleBuilder.build(r)).split(",")[17].trim());
+    }
+
+    @Test
+    public void aDownShadowMovesOnlyY() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.shadowOn = true;
+        r.options.shadowOffsetPx = 6f;
+        r.options.shadowDirection = CaptionStyleOptions.ShadowDirection.DOWN;
+        String d = firstDialogue(AssSubtitleBuilder.build(r));
+        assertTrue("y must move: " + d, d.contains("\\yshad6.48"));
+        assertTrue("x must not: " + d, d.contains("\\xshad0.00"));
+    }
+
+    @Test
+    public void aRightShadowMovesOnlyX() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.shadowOn = true;
+        r.options.shadowOffsetPx = 6f;
+        r.options.shadowDirection = CaptionStyleOptions.ShadowDirection.RIGHT;
+        String d = firstDialogue(AssSubtitleBuilder.build(r));
+        assertTrue("x must move: " + d, d.contains("\\xshad6.48"));
+        assertTrue("y must not: " + d, d.contains("\\yshad0.00"));
+    }
+
+    @Test
+    public void noShadowEmitsNoShadowTags() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.shadowOn = false;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            assertFalse("no shadow expected: " + line, line.contains("shad"));
+        }
+    }
+
+    @Test
+    public void thePreviewWordSpacingReachesTheExport() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.wordSpacingPx = 22f;
+        String d = firstDialogue(AssSubtitleBuilder.build(r));
+        assertTrue("word spacing must be exported: " + d, d.contains("\\fsp"));
+    }
+
+    @Test
+    public void zeroWordSpacingEmitsNoTrackingTag() {
+        AssSubtitleBuilder.Request r = req();
+        r.options.wordSpacingPx = 0f;
+        for (String line : dialogues(AssSubtitleBuilder.build(r))) {
+            assertFalse("no tracking expected: " + line, line.contains("\\fsp"));
+        }
+    }
+
+    @Test
+    public void theActiveWordBoxIsReportedAsNotExported() {
+        CaptionStyleOptions withBox = new CaptionStyleOptions();
+        withBox.activeWordBgOn = true;
+        assertFalse(StyleAssMapper.optionNotes(withBox).isEmpty());
+
+        CaptionStyleOptions without = new CaptionStyleOptions();
+        without.activeWordBgOn = false;
+        assertEquals("", StyleAssMapper.optionNotes(without));
+    }
+
     // ---- helpers -------------------------------------------------------
 
     private static String styleLine(String ass) {

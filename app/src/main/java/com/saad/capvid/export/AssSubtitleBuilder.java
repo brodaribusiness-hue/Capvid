@@ -146,7 +146,8 @@ public final class AssSubtitleBuilder {
 
         float fontSize = Math.max(6f, r.previewTextSizePx * scale * m.sizeScale);
         float outline = m.outlineWidth * scale;
-        float shadow = m.shadowDepth * scale;
+        float shadowX = m.shadowX * scale;
+        float shadowY = m.shadowY * scale;
         float glow = m.glowRadius * scale;
         float lineHeight = Math.max(1f, r.previewLineHeightPx * scale);
 
@@ -207,7 +208,10 @@ public final class AssSubtitleBuilder {
                 (m.italic || r.italic || r.fontAssetIsItalic) ? -1 : 0,
                 m.borderStyle,
                 outline,
-                shadow,
+                // Deliberately 0: the Style has one Shadow field and libass
+                // applies it to both axes, so the directional offset is emitted
+                // per event as \xshad / \yshad instead.
+                0f,
                 an));
         sb.append('\n');
 
@@ -235,10 +239,13 @@ public final class AssSubtitleBuilder {
             for (int li = windowStart; li < windowEnd; li++) {
                 boolean isActiveLine = (li == active);
                 float y = baseY + (li - active) * lineHeight;
+                CaptionLayout.Line line = lines.get(li);
                 String text = isActiveLine
-                        ? karaokeText(lines.get(li), options)
-                        : staticText(lines.get(li), options, m);
-                String perLineTags = isActiveLine ? m.activeWordTags : m.contextWordTags;
+                        ? karaokeText(line, options)
+                        : staticText(line, options, m);
+                String perLineTags = (isActiveLine ? m.activeWordTags : m.contextWordTags)
+                        + shadowTags(shadowX, shadowY)
+                        + wordSpacingTag(line, options, scale);
 
                 // Halo first. Everything stays on Layer 0 and relies on read
                 // order: libass sorts by (Layer, ReadOrder), so the halo, which
@@ -273,6 +280,31 @@ public final class AssSubtitleBuilder {
                 .append(String.format(Locale.US, "\\pos(%.1f,%.1f)", x, y));
         if (extraTags != null && !extraTags.isEmpty()) sb.append(extraTags);
         sb.append('}').append(text).append('\n');
+    }
+
+    /** Directional shadow offset. Empty when there is no shadow. */
+    private static String shadowTags(float x, float y) {
+        if (Math.abs(x) < 0.01f && Math.abs(y) < 0.01f) return "";
+        return String.format(Locale.US, "\\xshad%.2f\\yshad%.2f", x, y);
+    }
+
+    /**
+     * The preview separates words by {@code options.wordSpacingPx}; ASS has no
+     * per-word gap, only {@code \fsp}, which adds to EVERY glyph's advance.
+     * Spreading the total extra width across the line's glyphs keeps the line's
+     * overall width - and therefore the caption's footprint in the frame - the
+     * same as the preview, at the cost of slightly even letter tracking.
+     */
+    private static String wordSpacingTag(CaptionLayout.Line line, CaptionStyleOptions options,
+                                         float scale) {
+        float gapPx = options.wordSpacingPx * scale;
+        if (gapPx < 0.01f || line.words.size() < 2) return "";
+        int glyphs = 0;
+        for (CaptionWord w : line.words) glyphs += Math.max(1, trim(w.text).length());
+        glyphs += line.words.size() - 1;          // the separator spaces
+        if (glyphs <= 0) return "";
+        float fsp = ((line.words.size() - 1) * gapPx) / glyphs;
+        return String.format(Locale.US, "\\fsp%.2f", fsp);
     }
 
     /**
