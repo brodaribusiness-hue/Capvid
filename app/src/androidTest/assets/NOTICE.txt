@@ -1,0 +1,1 @@
+sample.mp4 is a short H.264 MP4 copied from the AndroidX Media test-data repository (libraries/test_data/src/test/assets/media/mp4/sample.mp4) for the local instrumented export smoke test. AndroidX Media is distributed under the Apache License 2.0; the repository's license and notices apply to the source asset.

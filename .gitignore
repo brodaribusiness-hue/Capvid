@@ -1,0 +1,22 @@
+# Gradle / Android build output
+.gradle/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local model and media artifacts (too large for Git)
+app/src/main/cpp/whisper/
+app/src/main/assets/models/
+*.bin
+*.f32le
+*.mp4
+*.mov
+*.mkv
+!app/src/androidTest/assets/sample.mp4
+
+# IDE
+.idea/
+*.iml
+.DS_Store
