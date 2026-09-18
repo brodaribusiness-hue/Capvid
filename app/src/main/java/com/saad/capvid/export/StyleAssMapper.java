@@ -88,7 +88,151 @@ public final class StyleAssMapper {
         public boolean gradientVertical = true;
     }
 
+    // ---- legibility -----------------------------------------------------
+    // Every value below is mirrored in tools/audit_contrast.py, which scores
+    // all 60 templates in CI. Change one and the auditor disagrees.
+
+    /**
+     * 43% opacity (the old hard-coded 110) cannot separate a box from the
+     * footage behind it: whatever the box colour, 57% of the frame shows
+     * through, which caps the worst-case contrast at 2.61:1. At 69% a dark box
+     * over a white frame still reads as a distinct card and clears the bar.
+     */
+    static final int BOX_TRANSLUCENT_ALPHA = 175;
+
+    static final int NEAR_BLACK = 0xFF0A0A0F;
+    static final int NEAR_WHITE = 0xFFFAFAFA;
+    /**
+     * Extra shadow offset beyond the outline, in preview pixels.
+     *
+     * <p>libass draws the shadow as the whole glyph-plus-outline silhouette
+     * offset by (xshad, yshad) and paints the main layer on top, so a shadow
+     * offset smaller than the outline width is hidden behind the outline and
+     * contributes no pixels. The offset has to clear the outline or the colour
+     * the contrast score counts simply is not on screen.
+     */
+    static final float LEGIBILITY_SHADOW_PAD = 2f;
+    /** Never push the shadow further than this, or it detaches from the text. */
+    static final float LEGIBILITY_SHADOW_MAX = 8f;
+    /** WCAG AA for large text. Captions sit on uncontrolled footage. */
+    static final float MIN_WORST_CASE = 3.0f;
+
     private StyleAssMapper() {
+    }
+
+    /**
+     * WCAG 2.x relative luminance. Alpha is ignored: a translucent colour has
+     * no luminance of its own until it is composited over something.
+     */
+    static float luminance(int rgb) {
+        return 0.2126f * channel(Color.red(rgb))
+             + 0.7152f * channel(Color.green(rgb))
+             + 0.0722f * channel(Color.blue(rgb));
+    }
+
+    private static float channel(int v) {
+        float c = v / 255f;
+        return c <= 0.03928f ? c / 12.92f : (float) Math.pow((c + 0.055) / 1.055, 2.4);
+    }
+
+    static float contrast(int a, int b) {
+        float la = luminance(a);
+        float lb = luminance(b);
+        float hi = Math.max(la, lb);
+        float lo = Math.min(la, lb);
+        return (hi + 0.05f) / (lo + 0.05f);
+    }
+
+    /**
+     * The contrast this caption block keeps against the WORST possible frame.
+     *
+     * <p>The footage underneath is unknown, so a caption is only trustworthy if
+     * it survives every backdrop. Against a grey frame the block reads if any
+     * one of its colours separates from that frame, so the score at a given
+     * frame luminance is the max over the block; sweeping the whole range and
+     * keeping the minimum gives the worst frame the caption will ever meet.
+     *
+     * <p>White on black - the classic caption treatment - bottoms out at
+     * 4.62:1. A single mid-luminance fill such as #FF3B30 tops out at 2.46:1
+     * no matter which ONE extra colour is paired with it, which is why some
+     * templates need both a light and a dark element.
+     */
+    static float worstCaseOverFrames(int[] colours) {
+        float worst = Float.MAX_VALUE;
+        for (int i = 0; i <= 100; i++) {
+            float l = i / 100f;
+            float v = l <= 0.003038f
+                    ? l * 12.92f
+                    : 1.055f * (float) Math.pow(l, 1.0 / 2.4) - 0.055f;
+            int level = Math.max(0, Math.min(255, Math.round(v * 255f)));
+            int frame = Color.rgb(level, level, level);
+            float best = 0f;
+            for (int c : colours) best = Math.max(best, contrast(c, frame));
+            worst = Math.min(worst, best);
+        }
+        return worst;
+    }
+
+    /**
+     * Give a BorderStyle-1 mapping the light and dark elements it needs to stay
+     * readable on any footage, changing as little as possible.
+     *
+     * <p>A box (BorderStyle 3) is left alone: libass moves the box onto the
+     * shadow layer and repaints it in BackColour when a shadow offset is set
+     * (ass_render.c:2737), so a shadow would recolour the box. Box styles earn
+     * their contrast from the catalog palette instead, which
+     * tools/audit_contrast.py verifies.
+     */
+    static void ensureLegible(Mapping m) {
+        if (m.borderStyle != 1) return;
+
+        int[] withOutline = blockColours(m);
+        if (worstCaseOverFrames(withOutline) >= MIN_WORST_CASE) return;
+
+        if (worstCaseOverFrames(withDark(withOutline, NEAR_BLACK)) >= MIN_WORST_CASE) {
+            m.shadowColor = NEAR_BLACK;
+            m.shadowY = legibilityShadowOffset(m.outlineWidth);
+            return;
+        }
+        if (worstCaseOverFrames(withDark(withOutline, NEAR_WHITE)) >= MIN_WORST_CASE) {
+            m.shadowColor = NEAR_WHITE;
+            m.shadowY = legibilityShadowOffset(m.outlineWidth);
+            return;
+        }
+        // Mid-luminance fill AND outline: the outline has to become the light
+        // element and the shadow the dark one.
+        m.outlineColor = NEAR_WHITE;
+        m.shadowColor = NEAR_BLACK;
+        m.shadowY = legibilityShadowOffset(m.outlineWidth);
+    }
+
+    /** Far enough past the outline to be visible, close enough to read as one shape. */
+    static float legibilityShadowOffset(float outlineWidth) {
+        return Math.min(LEGIBILITY_SHADOW_MAX, outlineWidth + LEGIBILITY_SHADOW_PAD);
+    }
+
+    /**
+     * Every colour the rendered block puts against the video: the fill (one
+     * colour, or every gradient band), the outline or box, and - only when it
+     * actually has an offset - the shadow. A zero-offset shadow is drawn
+     * directly underneath the glyph and contributes nothing.
+     */
+    static int[] blockColours(Mapping m) {
+        int[] fills = m.gradientStops != null
+                ? m.gradientStops : new int[]{m.primaryColor};
+        boolean shadowed = m.shadowX != 0f || m.shadowY != 0f;
+        int[] out = new int[fills.length + 1 + (shadowed ? 1 : 0)];
+        System.arraycopy(fills, 0, out, 0, fills.length);
+        out[fills.length] = m.outlineColor;
+        if (shadowed) out[fills.length + 1] = m.shadowColor;
+        return out;
+    }
+
+    private static int[] withDark(int[] src, int extra) {
+        int[] out = new int[src.length + 1];
+        System.arraycopy(src, 0, out, 0, src.length);
+        out[src.length] = extra;
+        return out;
     }
 
     /**
@@ -123,7 +267,7 @@ public final class StyleAssMapper {
                 // layer, drawn in BackColour, when a shadow offset is set), so
                 // the translucency has to live in the outline colour's alpha.
                 m.borderStyle = 3;
-                m.outlineColor = withAlpha(sw[0], 110);
+                m.outlineColor = withAlpha(sw[0], BOX_TRANSLUCENT_ALPHA);
                 m.primaryColor = sw[1];
                 m.secondaryColor = withAlpha(sw[1], 190);
                 m.outlineWidth = 8f;
@@ -224,6 +368,9 @@ public final class StyleAssMapper {
         // ---- entrance / emphasis animation -------------------------------
         String anim = animationTagsFor(styleId);
         if (!anim.isEmpty()) m.activeWordTags = join(m.activeWordTags, anim);
+
+        // ---- legibility --------------------------------------------------
+        ensureLegible(m);
 
         // ---- user overrides win over the template ------------------------
         if (o.activeWordColorOn) m.primaryColor = o.activeWordColor;

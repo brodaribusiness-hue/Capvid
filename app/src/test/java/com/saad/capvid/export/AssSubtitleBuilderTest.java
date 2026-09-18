@@ -6,6 +6,8 @@ import static org.junit.Assert.assertTrue;
 
 import com.saad.capvid.caption.CaptionLayout;
 import com.saad.capvid.model.CaptionWord;
+import com.saad.capvid.style.CaptionStyleCatalog;
+import com.saad.capvid.style.CaptionStyleDefinition;
 import com.saad.capvid.style.CaptionStyleOptions;
 
 import org.junit.Test;
@@ -13,6 +15,7 @@ import org.junit.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -519,6 +522,115 @@ public class AssSubtitleBuilderTest {
         CaptionStyleOptions without = new CaptionStyleOptions();
         without.activeWordBgOn = false;
         assertEquals("", StyleAssMapper.optionNotes(without));
+    }
+
+    // ---- legibility ----------------------------------------------------
+
+    /**
+     * The point of the whole exercise: run every template in the catalog
+     * through the real mapper and score the result against the worst frame it
+     * will ever sit on. This is the same measurement tools/audit_contrast.py
+     * makes in Python, so the two disagree if either drifts.
+     */
+    @Test
+    public void everyTemplateStaysReadableOnTheWorstFrame() {
+        int checked = 0;
+        for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
+            StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
+            float worst = StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m));
+            assertTrue(def.id + " (" + def.treatment + ") only holds "
+                    + String.format(Locale.US, "%.2f", worst)
+                    + ":1 on its worst frame, need " + StyleAssMapper.MIN_WORST_CASE,
+                    worst >= StyleAssMapper.MIN_WORST_CASE);
+            checked++;
+        }
+        assertEquals(60, checked);
+    }
+
+    /** White on black is the reference treatment; it must score ~4.62:1. */
+    @Test
+    public void whiteOnBlackIsTheReferencePoint() {
+        float worst = StyleAssMapper.worstCaseOverFrames(
+                new int[]{0xFFFFFFFF, 0xFF000000});
+        assertEquals(4.62f, worst, 0.05f);
+    }
+
+    /**
+     * A mid-luminance fill cannot be rescued by one extra colour, which is the
+     * reason the legibility shadow exists at all.
+     */
+    @Test
+    public void oneExtraColourCannotRescueAMidLuminanceFill() {
+        int red = 0xFFFF3B30;
+        assertTrue(StyleAssMapper.worstCaseOverFrames(new int[]{red, 0xFF000000})
+                < StyleAssMapper.MIN_WORST_CASE);
+        assertTrue(StyleAssMapper.worstCaseOverFrames(
+                new int[]{red, 0xFFFAFAFA, 0xFF0A0A0F}) >= 4.0f);
+    }
+
+    @Test
+    public void aTemplateThatAlreadyReadsGetsNoLegibilityShadow() {
+        StyleAssMapper.Mapping m = StyleAssMapper.map("MINIMAL_FADE", null);
+        assertEquals(0f, m.shadowY, 0.001f);
+        assertEquals(0f, m.shadowX, 0.001f);
+    }
+
+    @Test
+    public void aMidLuminanceTemplateGetsTheLegibilityShadow() {
+        StyleAssMapper.Mapping m = StyleAssMapper.map("PUNCH_IN", null);
+        assertTrue("PUNCH_IN should have been given a shadow", m.shadowY != 0f);
+        assertTrue(StyleAssMapper.worstCaseOverFrames(StyleAssMapper.blockColours(m))
+                >= StyleAssMapper.MIN_WORST_CASE);
+    }
+
+    /**
+     * libass repaints a box in BackColour once a shadow offset is set
+     * (ass_render.c:2737), so a box style must never be given one - it would
+     * recolour the box. Box styles get their contrast from the palette.
+     */
+    @Test
+    public void noBoxStyleIsGivenALegibilityShadow() {
+        for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
+            StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
+            if (m.borderStyle == 3) {
+                assertEquals(def.id + " is a box and must not gain a shadow",
+                        0f, m.shadowY, 0.001f);
+            }
+        }
+    }
+
+    /**
+     * A shadow offset smaller than the outline width is painted over by the
+     * main layer, so the colour the contrast score counts would not be on
+     * screen at all.
+     */
+    @Test
+    public void theLegibilityShadowClearsTheOutline() {
+        int shifted = 0;
+        for (CaptionStyleDefinition def : CaptionStyleCatalog.ALL_STYLES) {
+            StyleAssMapper.Mapping m = StyleAssMapper.map(def.id, null);
+            if (m.borderStyle == 1 && m.shadowY != 0f) {
+                assertTrue(def.id + " shadow " + m.shadowY
+                        + " is hidden behind its " + m.outlineWidth + " outline",
+                        m.shadowY > m.outlineWidth);
+                assertTrue(def.id + " shadow detaches from the text",
+                        m.shadowY <= StyleAssMapper.LEGIBILITY_SHADOW_MAX);
+                shifted++;
+            }
+        }
+        assertTrue("expected some templates to need the legibility shadow", shifted > 0);
+    }
+
+    /** A user's own shadow choice still wins over the automatic one. */
+    @Test
+    public void theUserShadowOverridesTheLegibilityShadow() {
+        CaptionStyleOptions o = new CaptionStyleOptions();
+        o.shadowOn = true;
+        o.shadowOffsetPx = 9f;
+        o.shadowDirection = CaptionStyleOptions.ShadowDirection.RIGHT;
+        StyleAssMapper.Mapping m = StyleAssMapper.map("PUNCH_IN", o);
+        assertEquals(9f, m.shadowX, 0.001f);
+        assertEquals(0f, m.shadowY, 0.001f);
     }
 
     // ---- helpers -------------------------------------------------------
