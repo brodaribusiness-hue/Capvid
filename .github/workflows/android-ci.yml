@@ -58,11 +58,26 @@ jobs:
       - name: Install SDK platform, build-tools, NDK and CMake
         shell: bash
         run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
+          SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          echo "sdkmanager path: $SDKM"
+          ls -la "$(dirname "$SDKM")" 2>&1 | head -20 || true
+          echo "--- cmdline-tools tree ---"
+          ls -la "$ANDROID_SDK_ROOT/cmdline-tools" 2>&1 | head -20 || true
+          echo "--- ANDROID_SDK_ROOT ---"; ls -la "$ANDROID_SDK_ROOT" 2>&1 | head -30 || true
+          echo "--- sdkmanager --version ---"
+          "$SDKM" --version 2>&1 | head -5 || true
+          echo "--- install ---"
+          set +e
+          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" \
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;26.1.10909125" \
-            "cmake;3.22.1"
+            "cmake;3.22.1" > /tmp/sdk-install.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/sdk-install.log
+          echo "sdkmanager exit status: $status"
+          exit $status
 
       # Contract checks that a plain compile does not catch: package/directory
       # consistency, R.* references, style catalog <-> enum coverage, JNI symbol
@@ -97,7 +112,7 @@ jobs:
         run: |
           {
             echo "## Compiler / test output"
-            for f in /tmp/gradle-*.log; do
+            for f in /tmp/*.log; do
               [ -f "$f" ] || continue
               echo ""
               echo "### $f"
