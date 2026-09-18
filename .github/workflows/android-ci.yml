@@ -144,8 +144,18 @@ jobs:
               found=1
               echo ""
               echo "#### $f"
+              # Gradle prints "FAILURE / What went wrong / error:" BEFORE the long
+              # --stacktrace dump, so the head and a grep of the error lines are
+              # what actually matter; the tail alone shows only stack frames.
               echo '```'
-              tail -n 150 "$f"
+              echo "--- first 150 lines ---"
+              head -n 150 "$f"
+              echo ""
+              echo "--- error lines ---"
+              grep -nE "error:|error;|FAILURE|What went wrong|Caused by:|\.java:[0-9]+|Execution failed|> Task .* FAILED|BUILD FAILED" "$f" | head -100
+              echo ""
+              echo "--- last 40 lines ---"
+              tail -n 40 "$f"
               echo '```'
             done
             [ "$found" -eq 1 ] || echo "No logs were captured in /tmp."
