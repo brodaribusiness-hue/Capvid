@@ -97,10 +97,10 @@ public class CaptionOverlayView extends View {
 
     public void setWords(List<CaptionWord> words) { this.words = words; regroupLines(); invalidate(); }
     public void setCurrentTimeMs(long timeMs) { this.currentTimeMs = timeMs; invalidate(); }
-    public void setStyleType(CaptionStyleType type) { this.styleType = type; invalidate(); }
+    public void setStyleType(CaptionStyleType type) { this.styleType = type; colourMapping = null; invalidate(); }
     public CaptionStyleType getStyleType() { return styleType; }
 
-    public void setStyleOptions(CaptionStyleOptions o) { this.options = o; regroupLines(); invalidate(); }
+    public void setStyleOptions(CaptionStyleOptions o) { this.options = o; colourMapping = null; regroupLines(); invalidate(); }
     public CaptionStyleOptions getStyleOptions() { return options; }
 
     public void setBold(boolean bold) { this.bold = bold; invalidate(); }
@@ -290,7 +290,7 @@ public class CaptionOverlayView extends View {
                 textPaint.clearShadowLayer();
             } else {
                 Paint contextPaint = new Paint(textPaint);
-                contextPaint.setColor(Color.argb(190, 255, 255, 255));
+                contextPaint.setColor(contextColor());
                 contextPaint.clearShadowLayer();
                 contextPaint.setMaskFilter(null);
                 contextPaint.setShader(null);
@@ -398,6 +398,41 @@ public class CaptionOverlayView extends View {
         textPaint.setTextSkewX(italic ? -0.25f : 0f);
     }
 
+    /**
+     * The exact colour mapping the exporter uses, so the preview and the
+     * burn-in cannot disagree about what a template looks like.
+     *
+     * <p>The hand-written drawXxx() methods below used to hardcode their own
+     * accents - Color.YELLOW, Color.RED, Color.rgb(0, 191, 255) and so on -
+     * which matched neither the catalog palette nor the user's Color tab
+     * settings. The export always derived its colours from
+     * CaptionStyleCatalog.swatchColors plus options.activeWordColor, so for
+     * those ~20 templates the preview showed one colour and the video another.
+     */
+    private com.saad.capvid.export.StyleAssMapper.Mapping colourMapping;
+
+    private com.saad.capvid.export.StyleAssMapper.Mapping mapping() {
+        if (colourMapping == null) {
+            colourMapping = com.saad.capvid.export.StyleAssMapper.map(styleType.name(), options);
+        }
+        return colourMapping;
+    }
+
+    /** The colour the ACTIVE word is painted in. */
+    private int activeColor() {
+        return mapping().primaryColor;
+    }
+
+    /** The colour the surrounding words are painted in. */
+    private int contextColor() {
+        return mapping().secondaryColor;
+    }
+
+    /** The glow/halo colour, for the styles that have one. */
+    private int glowColor() {
+        return mapping().glowColor;
+    }
+
     private void resetFont() {
         textPaint.setTypeface(defaultTypeface);
         textPaint.setFakeBoldText(false);
@@ -405,6 +440,13 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawActiveStyle(Canvas canvas, CaptionWord w, float x, float y, float progress) {
+        // Set the active colour on entry rather than relying on whatever the
+        // previous effect left behind. Several of the drawXxx() methods below
+        // - drawMinimalFade among them - never set a colour at all and were
+        // painting the active word in the Color.WHITE that the last reset
+        // happened to leave in the paint, whatever the template or the user's
+        // Color tab said.
+        textPaint.setColor(activeColor());
         switch (styleType) {
             case MINIMAL_FADE: drawMinimalFade(canvas, w, x, y, progress); break;
             case KARAOKE_HIGHLIGHT: drawKaraokeHighlight(canvas, w, x, y, progress); break;
@@ -474,11 +516,11 @@ public class CaptionOverlayView extends View {
     private void drawKaraokeHighlight(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float textWidth = textPaint.measureText(w.text);
         float left = cx - textWidth / 2f;
-        textPaint.setColor(Color.GRAY);
+        textPaint.setColor(contextColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         canvas.save();
         canvas.clipRect(left, cy - textPaint.getTextSize(), left + textWidth * progress, cy + 10);
-        textPaint.setColor(Color.YELLOW);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         canvas.restore();
         textPaint.setColor(Color.WHITE);
@@ -489,17 +531,19 @@ public class CaptionOverlayView extends View {
         float padding = 14f;
 
         Paint boxPaint = new Paint(bgPaint);
-        boxPaint.setColor(Color.rgb(45, 0, 70));
+        boxPaint.setColor(options != null ? options.activeWordBgColor : Color.BLACK);
         boxPaint.setAlpha(230);
-        canvas.drawRect(cx - textWidth / 2f - padding, cy - textPaint.getTextSize(),
-                cx + textWidth / 2f + padding, cy + padding, boxPaint);
+        // The corner-radius option was dead here: drawRect has no radii.
+        float r = options != null ? options.activeWordBgCornerRadiusPx : 0f;
+        canvas.drawRoundRect(cx - textWidth / 2f - padding, cy - textPaint.getTextSize(),
+                cx + textWidth / 2f + padding, cy + padding, r, r, boxPaint);
 
-        textPaint.setColor(Color.rgb(120, 100, 0));
+        textPaint.setColor(mapping().outlineColor);
         canvas.drawText(w.text, cx + 3f, cy + 3f, textPaint);
         canvas.drawText(w.text, cx + 1.5f, cy + 1.5f, textPaint);
 
-        textPaint.setColor(Color.YELLOW);
-        textPaint.setShadowLayer(10f, 0, 0, Color.rgb(255, 230, 0));
+        textPaint.setColor(activeColor());
+        textPaint.setShadowLayer(10f, 0, 0, glowColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
         textPaint.setColor(Color.WHITE);
@@ -509,7 +553,7 @@ public class CaptionOverlayView extends View {
         float scale = progress < 0.5f ? 1f + 0.4f * (progress / 0.5f) : 1.4f - 0.4f * ((progress - 0.5f) / 0.5f);
         canvas.save();
         canvas.scale(scale, scale, cx, cy);
-        textPaint.setColor(Color.RED);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();
@@ -524,21 +568,21 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawGlowPop(Canvas canvas, CaptionWord w, float cx, float cy) {
-        textPaint.setShadowLayer(20f, 0, 0, Color.CYAN);
+        textPaint.setShadowLayer(20f, 0, 0, glowColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
     }
 
     private void drawColorSplash(Canvas canvas, CaptionWord w, float cx, float cy) {
         int[] colors = {Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.MAGENTA};
-        textPaint.setColor(colors[Math.abs(w.text.hashCode()) % colors.length]);
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
 
     private void drawShadowPulse(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float radius = 10f + 15f * (float) Math.abs(Math.sin(progress * Math.PI));
-        textPaint.setColor(Color.rgb(255, 215, 0));
+        textPaint.setColor(activeColor());
         textPaint.setShadowLayer(radius, 0, 0, Color.BLACK);
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.clearShadowLayer();
@@ -546,7 +590,7 @@ public class CaptionOverlayView extends View {
     }
 
     private void drawUnderlineDraw(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
-        textPaint.setColor(Color.rgb(0, 191, 255));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         float textWidth = textPaint.measureText(w.text);
         float left = cx - textWidth / 2f;
@@ -556,7 +600,7 @@ public class CaptionOverlayView extends View {
 
     private void drawSlideInCascade(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float slideOffset = (1f - Math.min(1f, progress * 3f)) * 200f;
-        textPaint.setColor(Color.rgb(0, 150, 60));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx - slideOffset, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
@@ -604,7 +648,7 @@ public class CaptionOverlayView extends View {
 
     private void drawBlurToFocus(Canvas canvas, CaptionWord w, float cx, float cy, float progress) {
         float blurRadius = Math.max(0.01f, 15f * (1f - progress));
-        textPaint.setColor(Color.rgb(255, 110, 199));
+        textPaint.setColor(activeColor());
         textPaint.setMaskFilter(new BlurMaskFilter(blurRadius, BlurMaskFilter.Blur.NORMAL));
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setMaskFilter(null);
@@ -622,7 +666,7 @@ public class CaptionOverlayView extends View {
         matrix.postTranslate(cx, cy);
         canvas.save();
         canvas.concat(matrix);
-        textPaint.setColor(Color.rgb(26, 35, 126));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();
@@ -646,7 +690,7 @@ public class CaptionOverlayView extends View {
         int alpha = progress < 0.05f ? (int) (255 * (progress / 0.05f)) : 255;
         canvas.save();
         canvas.scale(scale, scale, cx, cy);
-        textPaint.setColor(Color.rgb(176, 38, 255));
+        textPaint.setColor(activeColor());
         textPaint.setAlpha(alpha);
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setAlpha(255);
@@ -661,7 +705,7 @@ public class CaptionOverlayView extends View {
             float offset = (i + 1) * 4f;
             canvas.drawText(w.text, cx + offset, cy + offset, textPaint);
         }
-        textPaint.setColor(Color.rgb(255, 193, 7));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
     }
@@ -692,7 +736,7 @@ public class CaptionOverlayView extends View {
         matrix.postTranslate(cx, cy);
         canvas.save();
         canvas.concat(matrix);
-        textPaint.setColor(Color.rgb(207, 245, 255));
+        textPaint.setColor(activeColor());
         canvas.drawText(w.text, cx, cy, textPaint);
         textPaint.setColor(Color.WHITE);
         canvas.restore();

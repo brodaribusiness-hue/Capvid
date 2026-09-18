@@ -493,6 +493,48 @@ def check_balance(infos):
           % (len(infos) + len(extra), bad))
 
 
+def check_preview_palette():
+    """The preview must not invent its own colours.
+
+    Every accent in CaptionOverlayView's hand-written drawXxx() methods used to
+    be a literal - Color.YELLOW, Color.RED, Color.rgb(0, 191, 255) - matching
+    neither the catalog palette nor the user's Color tab, while the export
+    always derived its colours from StyleAssMapper. That is what made ~20
+    templates change colour between preview and burn-in.
+
+    Colour now comes from StyleAssMapper.map() via activeColor()/contextColor()/
+    glowColor(). Plain WHITE and BLACK resets after an effect are still allowed;
+    anything else is a reintroduced divergence.
+    """
+    section("11. preview draws its colours from the exporter's mapping")
+    path = os.path.join(JAVA_ROOT, "com/saad/capvid/caption/CaptionOverlayView.java")
+    if not os.path.exists(path):
+        ERRORS.append(("caption/preview", "CaptionOverlayView.java not found"))
+        return
+    allowed = ("Color.WHITE", "Color.BLACK")
+    method, hardcoded = None, []
+    for lineno, line in enumerate(open(path, encoding="utf-8").read().splitlines(), 1):
+        m = re.match(r"\s*private void (draw\w+)\(", line)
+        if m:
+            method = m.group(1)
+            continue
+        if not method:
+            continue
+        for call in ("setColor(", "setShadowLayer("):
+            if call not in line:
+                continue
+            for lit in re.findall(r"Color\.[A-Za-z]+|Color\.(?:rgb|argb|parseColor)\([^)]*\)",
+                                  line.split(call, 1)[1]):
+                if lit not in allowed:
+                    hardcoded.append((lineno, method, lit))
+    for lineno, method, lit in hardcoded:
+        ERRORS.append(("caption/preview",
+                       "CaptionOverlayView.java:%d %s hardcodes %s - preview and "
+                       "export will disagree; use activeColor()/contextColor()/glowColor()"
+                       % (lineno, method, lit)))
+    print("   hardcoded accents in drawXxx methods: %d" % len(hardcoded))
+
+
 def main():
     files, infos = load_java()
     check_balance(infos)
@@ -511,6 +553,7 @@ def main():
     check_jni(infos)
     check_manifest(infos)
     check_cmake()
+    check_preview_palette()
 
     section("SUMMARY")
     for w in WARNINGS:

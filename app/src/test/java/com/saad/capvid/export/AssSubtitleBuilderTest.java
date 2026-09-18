@@ -2,6 +2,7 @@ package com.saad.capvid.export;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import com.saad.capvid.caption.CaptionLayout;
@@ -526,6 +527,31 @@ public class AssSubtitleBuilderTest {
         CaptionStyleOptions without = new CaptionStyleOptions();
         without.activeWordBgOn = false;
         assertEquals("", StyleAssMapper.optionNotes(without));
+    }
+
+    // ---- preview and export must agree on colour -----------------------
+
+    /**
+     * CaptionOverlayView now takes its colours from this same mapping, so the
+     * active-word colour the user picks in the Color tab is one value in one
+     * place. These run without real catalog colours because the override is a
+     * plain int, not something Color.parseColor has to resolve.
+     */
+    @Test
+    public void theActiveWordColourOverrideReachesTheMapping() {
+        CaptionStyleOptions o = new CaptionStyleOptions();
+        o.activeWordColorOn = true;
+        o.activeWordColor = 0xFF123456;
+        assertEquals(0xFF123456, StyleAssMapper.map("MINIMAL_FADE", o).primaryColor);
+    }
+
+    @Test
+    public void switchingTheActiveWordColourOffKeepsTheTemplateColour() {
+        CaptionStyleOptions o = new CaptionStyleOptions();
+        o.activeWordColorOn = false;
+        o.activeWordColor = 0xFF123456;
+        assertNotEquals("the override must not leak through when switched off",
+                0xFF123456, StyleAssMapper.map("MINIMAL_FADE", o).primaryColor);
     }
 
     // ---- legibility ----------------------------------------------------

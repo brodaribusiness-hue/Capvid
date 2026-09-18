@@ -35,11 +35,11 @@ public final class StyleAssMapper {
         /** Colour of the word currently being spoken. */
         public int primaryColor = Color.WHITE;
         /** Colour of the surrounding context words. */
-        public int secondaryColor = Color.argb(190, 255, 255, 255);
+        public int secondaryColor = 0xBEFFFFFF;   // 190/255 white
         /** Outline / box colour. */
         public int outlineColor = Color.BLACK;
         /** Shadow colour. */
-        public int shadowColor = Color.argb(128, 0, 0, 0);
+        public int shadowColor = 0x80000000;      // 128/255 black
         public float outlineWidth = 2f;
         /**
          * Shadow offset on each axis, in preview pixels.
