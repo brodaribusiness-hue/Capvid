@@ -21,6 +21,13 @@ jobs:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       ANDROID_HOME: /usr/local/lib/android/sdk
 
+    # pipefail is essential here: several steps pipe Gradle into `tee`, and
+    # without it the step would report the exit status of `tee` (always 0) and a
+    # failed build would look like a pass.
+    defaults:
+      run:
+        shell: bash --noprofile --norc -eo pipefail {0}
+
     steps:
       - name: Checkout repository (with pinned submodules)
         uses: actions/checkout@v4
@@ -105,6 +112,10 @@ jobs:
         run: |
           set -e
           APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          echo "APK: $APK ($(du -h "$APK" | cut -f1))"
+          echo "--- all native libs in the APK ---"
+          unzip -l "$APK" | grep -E "lib/.*\.so" || echo "(none found)"
+          echo "---"
           for abi in arm64-v8a armeabi-v7a; do
             unzip -l "$APK" | grep -q "lib/$abi/libcapvid_native.so" \
               || { echo "::error::libcapvid_native.so missing for $abi"; exit 1; }
