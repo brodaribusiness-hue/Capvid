@@ -48,10 +48,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # `yes | sdkmanager` must NOT run under pipefail: `yes` is killed by
+      # SIGPIPE when sdkmanager closes the pipe and exits 141, which pipefail
+      # would report as a failure. The pipeline's real status is sdkmanager's.
       - name: Accept Android SDK licenses
+        shell: bash
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses --sdk_root=$ANDROID_SDK_ROOT || true
 
       - name: Install SDK platform, build-tools, NDK and CMake
+        shell: bash
         run: |
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
             "platforms;android-34" \
