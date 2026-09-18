@@ -122,7 +122,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showSetup(video: File) {
-        val setup = CaptionSetupScreen(this, video, object : CaptionSetupScreen.Callbacks {
+        lateinit var setup: CaptionSetupScreen
+        setup = CaptionSetupScreen(this, video, object : CaptionSetupScreen.Callbacks {
             override fun onProceed(language: CaptionLanguage, addCaptions: Boolean) {
                 val project = Project.create(video.absolutePath, video.name, readDuration(video), language).copy(addCaptions = addCaptions)
                 viewModel.open(project)

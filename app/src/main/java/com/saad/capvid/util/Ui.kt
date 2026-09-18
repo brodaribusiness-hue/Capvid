@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.saad.capvid.R
+import kotlin.math.roundToInt
 
 object Ui {
     fun dp(context: Context, value: Float): Int = (value * context.resources.displayMetrics.density).roundToInt()
@@ -73,5 +74,4 @@ object Ui {
         }
     }
 
-    private fun Float.roundToInt(): Int = kotlin.math.roundToInt()
 }

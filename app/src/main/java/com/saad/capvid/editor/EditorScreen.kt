@@ -221,7 +221,7 @@ class EditorScreen(
         val start = EditText(context).apply { setText(word.startMs.toString()); hint = "Start milliseconds"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setTextColor(ContextCompat.getColor(context, R.color.capvid_text)); background = Ui.rounded(context, ContextCompat.getColor(context, R.color.capvid_surface_alt), 10f); setPadding(14, 0, 14, 0) }
         val end = EditText(context).apply { setText(word.endMs.toString()); hint = "End milliseconds"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setTextColor(ContextCompat.getColor(context, R.color.capvid_text)); background = Ui.rounded(context, ContextCompat.getColor(context, R.color.capvid_surface_alt), 10f); setPadding(14, 0, 14, 0) }
         val highlight = android.widget.Switch(context).apply {
-            text = "Highlight this word"
+            this.text = "Highlight this word"
             isChecked = word.highlighted
             setTextColor(ContextCompat.getColor(context, R.color.capvid_text))
         }

@@ -4,6 +4,7 @@ import android.app.Dialog
 import android.content.Context
 import android.graphics.Color
 import android.text.InputType
+import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
@@ -47,7 +48,7 @@ class StylePanelDialog(
         }
         body.addView(tabs)
         val scroll = ScrollView(context)
-        scroll.addView(tabContent, ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT))
+        scroll.addView(tabContent, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         body.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         val footer = Ui.horizontal(context, 8f)
         footer.addView(Ui.button(context, "Cancel").apply { setOnClickListener { dismiss() } }, LinearLayout.LayoutParams(0, Ui.dp(context, 50f), 1f))
@@ -55,7 +56,7 @@ class StylePanelDialog(
         body.addView(footer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = Ui.dp(context, 12f) })
         setContentView(body)
         window?.setBackgroundDrawableResource(android.R.color.transparent)
-        window?.setLayout((resources.displayMetrics.widthPixels * 0.94f).toInt(), (resources.displayMetrics.heightPixels * 0.84f).toInt())
+        window?.setLayout((context.resources.displayMetrics.widthPixels * 0.94f).toInt(), (context.resources.displayMetrics.heightPixels * 0.84f).toInt())
         rebuildTabs(tabs)
     }
 
