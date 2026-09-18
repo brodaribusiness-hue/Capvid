@@ -533,7 +533,11 @@ marked otherwise.
 | CAP-040 | MEDIUM | CAPTION | `StyleAssMapper.luminance`, `AssSubtitleBuilderTest` | The first contrast tests failed 6/64 with `expected:<4.62> but was:<1.0>`. `android.graphics.Color` is a no-op stub in the mockable android.jar (`returnDefaultValues = true`), so `Color.red()` returned 0, every colour was black, and every ratio was exactly 1.0 - `ensureLegible` then shadowed all 60 templates | the WCAG maths now shifts bits instead of calling `Color`; catalog-dependent tests `Assume` real colours and skip with a reason; the catalog itself is verified by the Python auditor, which reads the hex literals out of the source | CI run 35348197570: 69 tests, 0 failed, **6 skipped** - the skips are the guarded ones, not silent passes |
 | CAP-041 | MEDIUM | EXPORT | `StyleAssMapper.optionNotes` | `options.activeWordBgOn` was silently dropped at export: the preview draws the active-word box with `Canvas.drawRoundRect`, but a karaoke line exposes no per-word x offsets for libass to anchor a vector box to | cannot be burned in; now reported to the user before export instead of being dropped quietly | `theActiveWordBoxIsReportedAsNotExported` |
 
-**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 12 · MEDIUM 14 · LOW 3 = **41 total, 40 fixed, 1 tracked** (CAP-026, i18n).
+| CAP-042 | HIGH | CAPTION | `CaptionOverlayView`, ~20 `drawXxx()` methods | **The root cause behind "the style changes on export."** Every hand-written draw hardcoded its own accent: `Color.YELLOW` in `drawKaraokeHighlight`, `Color.RED` in `drawBouncePop`, `Color.rgb(0,191,255)` in `drawUnderlineDraw`, `Color.rgb(45,0,70)` for the highlight box, a rainbow chosen by `w.text.hashCode()` in `drawColorSplash`. None matched `CaptionStyleCatalog.swatchColors` and none read `options.activeWordColor`, while the export always derived its colours from both - so for those templates the preview showed one colour and the video another, and the Color tab's active-word picker looked dead on screen while still changing the output | the preview now calls the same `StyleAssMapper.map()` the exporter calls, via `activeColor()`/`contextColor()`/`glowColor()` | `theActiveWordColourOverrideReachesTheMapping`, `switchingTheActiveWordColourOffKeepsTheTemplateColour`, and `tools/audit_static.py` section 11, which fails the build if a hardcoded accent returns |
+| CAP-043 | MEDIUM | CAPTION | `CaptionOverlayView.drawActiveStyle` | `drawMinimalFade` and several others never set a colour at all - they painted the active word in whatever the previous effect's reset left in `textPaint`, usually `Color.WHITE`, regardless of template or user settings | `drawActiveStyle` sets the active colour on entry | covered by section 11 plus the colour-override tests |
+| CAP-044 | MEDIUM | UI | `CaptionOverlayView.drawHighlightBoxMarker` | `options.activeWordBgCornerRadiusPx` was dead: the box was drawn with `drawRect`, which has no radii, and its colour was a hardcoded `Color.rgb(45,0,70)` rather than `options.activeWordBgColor` | `drawRoundRect` with the option's radius, coloured from the option | manual; the Color tab's radius slider now visibly changes the box |
+
+**Counts by severity:** BLOCKER 6 · CRITICAL 6 · HIGH 13 · MEDIUM 16 · LOW 3 = **44 total, 43 fixed, 1 tracked** (CAP-026, i18n).
 
 **What `\t` can actually animate** (from `ass_parse.c`, not from documentation):
 `\t` re-parses its argument tags with an interpolation factor, and a tag honours
@@ -722,7 +726,7 @@ the camera flow are all preserved.
 | Timestamp units | `whisper.h:670` | **CONFIRMED centiseconds → `×10` correct** |
 | Gradle wrapper integrity | `sha256sum` + `wrapper-validation` | **PASS — `d3b261c2…`** |
 | Gradle wrapper scripts launch java correctly | local probe with a stub `java` | **PASS after CAP-029 — correct args and classpath** |
-| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 69 tests, 0 failed, 0 errored, 6 skipped** |
+| JVM unit tests | `./gradlew testDebugUnitTest` (CI) | **PASS — 71 tests, 0 failed, 0 errored, 6 skipped** |
 | Caption contrast | `python3 tools/audit_contrast.py` (CI) | **PASS — 60/60 templates clear 3:1 on their worst possible frame** |
 | `lintDebug` | CI | **PASS** |
 | Native build (NDK 26.1.10909125 / CMake 3.22.1, both ABIs) | `./gradlew assembleDebug` (CI) | **PASS — APK 27,607,385 bytes; `libcapvid_native.so` in `arm64-v8a` and `armeabi-v7a`** |
@@ -739,8 +743,8 @@ The breakdown, as reported by `tools/junit_summary.py` from Gradle's JUnit XML:
 |---|---:|---:|---:|---:|
 | `com.saad.capvid.caption.CaptionFrameGeometryTest` | 8 | 0 | 0 | 0 |
 | `com.saad.capvid.caption.CaptionLayoutTest` | 12 | 0 | 0 | 0 |
-| `com.saad.capvid.export.AssSubtitleBuilderTest` | 49 | 0 | 0 | 6 |
-| **total** | **69** | **0** | **0** | **6** |
+| `com.saad.capvid.export.AssSubtitleBuilderTest` | 51 | 0 | 0 | 6 |
+| **total** | **71** | **0** | **0** | **6** |
 
 The 6 skips are deliberate. `android.graphics.Color` is a no-op stub in the
 mockable android.jar that JVM unit tests run against, so every catalog colour
