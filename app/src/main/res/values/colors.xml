@@ -1,0 +1,12 @@
+<resources>
+    <color name="capvid_bg">#101114</color>
+    <color name="capvid_surface">#191B21</color>
+    <color name="capvid_surface_alt">#232630</color>
+    <color name="capvid_purple">#A78BFA</color>
+    <color name="capvid_purple_dark">#7C5DCC</color>
+    <color name="capvid_text">#F6F4FB</color>
+    <color name="capvid_muted">#A7A4B2</color>
+    <color name="capvid_green">#6EE7B7</color>
+    <color name="capvid_orange">#FDBA74</color>
+    <color name="capvid_error">#FB7185</color>
+</resources>

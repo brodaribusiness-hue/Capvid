@@ -1,0 +1,90 @@
+name: Android CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out Capvid
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Install Android SDK packages from the pre-installed SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973" \
+            "emulator" \
+            "system-images;android-34;google_apis;x86_64"
+
+      - name: Fetch whisper.cpp source for the native build
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf app/src/main/cpp/whisper
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git app/src/main/cpp/whisper
+
+      - name: Assemble debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          log=/tmp/capvid-assemble.log
+          if ! gradle :app:assembleDebug --stacktrace --console=plain >"$log" 2>&1; then
+            summary=$(grep -E 'FAILURE|What went wrong|Execution failed|error:|ERROR|Could not|A problem occurred|e: |w: ' "$log" | tail -100 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/:/%3A/g; s/,/%2C/g')
+            echo "::error title=Gradle assemble failure::$summary"
+            tail -120 "$log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          tail -80 "$log"
+
+      - name: Run JVM unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          log=/tmp/capvid-test.log
+          if ! gradle :app:test --stacktrace --console=plain >"$log" 2>&1; then
+            summary=$(grep -E 'FAILURE|What went wrong|Execution failed|error:|ERROR|Could not|A problem occurred|e: |w: |FAILED|AssertionError|Exception|expected|Caused by|com.saad.capvid|tests completed' "$log" | tail -100 | tr '\n' ' ' | sed 's/%/%25/g; s/\r/%0D/g; s/:/%3A/g; s/,/%2C/g')
+            echo "::error title=Gradle test failure::$summary"
+            tail -120 "$log" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          tail -80 "$log"
+
+      - name: Run instrumented tests on API 34 emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          emulator-options: -no-window -gpu off -no-audio -no-boot-anim -no-snapshot -camera-back none -camera-front none -selinux permissive
+          disable-animations: true
+          script: gradle :app:connectedAndroidTest --stacktrace --console=plain

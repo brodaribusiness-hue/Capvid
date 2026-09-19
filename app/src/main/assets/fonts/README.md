@@ -1,0 +1,1 @@
+These bundled font files are sourced from the Google Fonts repository and are redistributed under the SIL Open Font License. They cover display, sans, serif, handwritten/script, calligraphy, Arabic, and monospace categories. OFL.txt is included for the font license; FontManager loads these assets locally and VideoExporter copies them to FFmpeg's fontsdir.
