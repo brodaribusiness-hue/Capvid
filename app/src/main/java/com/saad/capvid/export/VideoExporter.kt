@@ -82,7 +82,7 @@ class VideoExporter(private val context: Context) {
                 durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                 fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()?.coerceIn(1f, 120f) ?: 30f,
                 hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
-                    ?.equals("yes", ignoreCase = true) ?: true
+                    ?.equals("yes", ignoreCase = true) ?: false
             )
         } finally {
             retriever.release()
