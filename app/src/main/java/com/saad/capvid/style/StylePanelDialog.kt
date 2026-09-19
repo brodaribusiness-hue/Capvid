@@ -88,7 +88,7 @@ class StylePanelDialog(
                 isClickable = true
                 setOnClickListener { working = style; buildTemplates() }
             }
-            val sample = Ui.text(context, "Aa  ${style.name}", 18f, color(style.activeColor)).apply {
+            val sample = Ui.text(context, style.name, 18f, color(style.activeColor)).apply {
                 typeface = FontManager(context).typeface(style)
             }
             card.addView(sample)
