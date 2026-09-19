@@ -32,4 +32,4 @@ The preview and exporter share `CaptionEffect` and the same preset definitions. 
 
 ## CI
 
-`.github/workflows/android-ci.yml` installs the Android SDK packages from the runner's pre-installed SDK, installs Gradle directly, fetches whisper.cpp, builds the debug APK, runs JVM tests, boots an API 35 emulator, and runs instrumented tests. No cloud transcription service is used.
+`.github/workflows/android-ci.yml` installs the Android SDK packages from the runner's pre-installed SDK, installs Gradle directly, fetches whisper.cpp, builds the debug APK, runs JVM tests, boots an API 34 emulator with software graphics, and runs instrumented tests. No cloud transcription service is used.
