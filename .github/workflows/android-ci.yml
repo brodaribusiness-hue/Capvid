@@ -43,7 +43,7 @@ jobs:
             "cmake;3.22.1" \
             "ndk;27.0.12077973" \
             "emulator" \
-            "system-images;android-35;google_apis;x86_64"
+            "system-images;android-34;google_apis;x86_64"
 
       - name: Fetch whisper.cpp source for the native build
         shell: bash
@@ -78,13 +78,13 @@ jobs:
           fi
           tail -80 "$log"
 
-      - name: Run instrumented tests on API 35 emulator
+      - name: Run instrumented tests on API 34 emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: 34
           target: google_apis
           arch: x86_64
           profile: pixel_2
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          emulator-options: -no-window -gpu off -no-audio -no-boot-anim -no-snapshot -camera-back none -camera-front none -selinux permissive
           disable-animations: true
           script: gradle :app:connectedAndroidTest --stacktrace --console=plain
