@@ -9,6 +9,7 @@ import com.saad.capvid.model.CaptionLanguage
 import com.saad.capvid.model.CaptionStyle
 import com.saad.capvid.model.CaptionWord
 import com.saad.capvid.model.Project
+import com.saad.capvid.model.VideoSegment
 import com.saad.capvid.model.VideoTransform
 import org.json.JSONArray
 import org.json.JSONObject
@@ -157,14 +158,35 @@ object ProjectJsonCodec {
         put("zoom", transform.zoom.toDouble())
         put("panX", transform.panX.toDouble())
         put("panY", transform.panY.toDouble())
+        put("segments", JSONArray().also { array ->
+            transform.segments.forEach { segment ->
+                array.put(JSONObject().apply {
+                    put("startMs", segment.startMs)
+                    put("endMs", segment.endMs)
+                })
+            }
+        })
     }
 
-    private fun transformFromJson(json: JSONObject) = VideoTransform(
-        trimStartMs = json.optLong("trimStartMs", 0L),
-        trimEndMs = json.optLong("trimEndMs", 0L),
-        aspectRatio = runCatching { AspectRatio.valueOf(json.optString("aspectRatio")) }.getOrDefault(AspectRatio.ORIGINAL),
-        zoom = json.optDouble("zoom", 1.0).toFloat().coerceAtLeast(1f),
-        panX = json.optDouble("panX", 0.0).toFloat().coerceIn(-1f, 1f),
-        panY = json.optDouble("panY", 0.0).toFloat().coerceIn(-1f, 1f)
-    )
+    private fun transformFromJson(json: JSONObject): VideoTransform {
+        val segmentsJson = json.optJSONArray("segments") ?: JSONArray()
+        val segments = buildList {
+            for (index in 0 until segmentsJson.length()) {
+                segmentsJson.optJSONObject(index)?.let { segment ->
+                    val start = segment.optLong("startMs", 0L)
+                    val end = segment.optLong("endMs", 0L)
+                    if (end > start) add(VideoSegment(start, end))
+                }
+            }
+        }
+        return VideoTransform(
+            trimStartMs = json.optLong("trimStartMs", 0L),
+            trimEndMs = json.optLong("trimEndMs", 0L),
+            aspectRatio = runCatching { AspectRatio.valueOf(json.optString("aspectRatio")) }.getOrDefault(AspectRatio.ORIGINAL),
+            zoom = json.optDouble("zoom", 1.0).toFloat().coerceAtLeast(1f),
+            panX = json.optDouble("panX", 0.0).toFloat().coerceIn(-1f, 1f),
+            panY = json.optDouble("panY", 0.0).toFloat().coerceIn(-1f, 1f),
+            segments = segments
+        )
+    }
 }

@@ -99,15 +99,67 @@ data class CaptionStyle(
     val breaks: BreakSettings = BreakSettings()
 )
 
+data class VideoSegment(
+    val startMs: Long,
+    val endMs: Long
+) {
+    val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+}
+
 data class VideoTransform(
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = 0L,
     val aspectRatio: AspectRatio = AspectRatio.ORIGINAL,
     val zoom: Float = 1f,
     val panX: Float = 0f,
-    val panY: Float = 0f
+    val panY: Float = 0f,
+    /** Source-time ranges that remain after split/delete operations. */
+    val segments: List<VideoSegment> = emptyList()
 ) {
     fun effectiveEnd(durationMs: Long): Long = if (trimEndMs <= 0L) durationMs else minOf(trimEndMs, durationMs)
+
+    /** Returns the source ranges in playback order, clipped to the trim window. */
+    fun sourceSegments(durationMs: Long): List<VideoSegment> {
+        val safeDuration = durationMs.coerceAtLeast(0L)
+        val lower = trimStartMs.coerceIn(0L, safeDuration)
+        val upper = effectiveEnd(safeDuration).coerceIn(lower, safeDuration)
+        val candidates = if (segments.isEmpty()) listOf(VideoSegment(lower, upper)) else segments
+        return candidates.mapNotNull { segment ->
+            val start = segment.startMs.coerceIn(lower, upper)
+            val end = segment.endMs.coerceIn(start, upper)
+            VideoSegment(start, end).takeIf { it.durationMs >= 40L }
+        }.sortedBy { it.startMs }
+    }
+
+    /** Splits the clip containing the playhead without changing its source content. */
+    fun splitAt(playheadMs: Long, durationMs: Long): VideoTransform {
+        val ranges = sourceSegments(durationMs)
+        val point = playheadMs.coerceIn(0L, durationMs.coerceAtLeast(0L))
+        val split = ranges.flatMap { segment ->
+            if (point > segment.startMs + 40L && point < segment.endMs - 40L) {
+                listOf(VideoSegment(segment.startMs, point), VideoSegment(point, segment.endMs))
+            } else listOf(segment)
+        }
+        return if (split.size == ranges.size) this
+        else copy(trimStartMs = 0L, trimEndMs = 0L, segments = split)
+    }
+
+    /** Removes one split clip and collapses a single remaining range back to trim. */
+    fun deleteSegment(index: Int, durationMs: Long): VideoTransform {
+        val ranges = sourceSegments(durationMs)
+        if (index !in ranges.indices) return this
+        val remaining = ranges.filterIndexed { position, _ -> position != index }
+        if (remaining.isEmpty()) return copy(trimStartMs = 0L, trimEndMs = 1L, segments = emptyList())
+        if (remaining.size == 1) {
+            val only = remaining.single()
+            return copy(
+                trimStartMs = only.startMs,
+                trimEndMs = if (only.endMs >= durationMs) 0L else only.endMs,
+                segments = emptyList()
+            )
+        }
+        return copy(trimStartMs = 0L, trimEndMs = 0L, segments = remaining)
+    }
 }
 
 data class Project(

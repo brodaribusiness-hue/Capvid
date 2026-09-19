@@ -46,6 +46,18 @@ class TransformCommand(
     override val description: String = "Edit trim or scale"
 ) : SnapshotCommand(description, before, after)
 
+class SplitClipCommand(
+    before: Project,
+    after: Project,
+    override val description: String = "Split video clip"
+) : SnapshotCommand(description, before, after)
+
+class DeleteClipCommand(
+    before: Project,
+    after: Project,
+    override val description: String = "Delete video clip"
+) : SnapshotCommand(description, before, after)
+
 class AddCaptionCommand(
     before: Project,
     after: Project,
@@ -114,6 +126,8 @@ object Commands {
     fun timing(before: Project, after: Project) = UpdateWordTimingCommand(before, after)
     fun style(before: Project, after: Project) = ApplyStyleCommand(before, after)
     fun transform(before: Project, after: Project) = TransformCommand(before, after)
+    fun splitClip(before: Project, after: Project) = SplitClipCommand(before, after)
+    fun deleteClip(before: Project, after: Project) = DeleteClipCommand(before, after)
     fun addCaption(before: Project, after: Project) = AddCaptionCommand(before, after)
     fun deleteCaption(before: Project, after: Project) = DeleteCaptionCommand(before, after)
     fun highlight(before: Project, after: Project) = HighlightCommand(before, after)

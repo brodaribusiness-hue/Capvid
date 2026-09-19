@@ -5,6 +5,7 @@ import com.saad.capvid.model.CaptionEffect
 import com.saad.capvid.model.CaptionStyle
 import com.saad.capvid.model.CaptionWord
 import com.saad.capvid.model.Project
+import com.saad.capvid.model.VideoSegment
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -16,21 +17,38 @@ import kotlin.math.roundToInt
 object AssSubtitleBuilder {
     fun build(project: Project, width: Int = 1920, height: Int = 1080): String {
         val style = project.style
-        val trimStart = project.transform.trimStartMs
-        val trimEnd = project.transform.effectiveEnd(project.durationMs)
-        val words = project.words.mapNotNull { word ->
-            val start = word.startMs - trimStart
-            val end = word.safeEndMs - trimStart
-            val clippedEnd = if (trimEnd > 0L) minOf(end, trimEnd - trimStart) else end
-            if (clippedEnd <= 0L || start >= (trimEnd - trimStart).coerceAtLeast(1L)) null
-            else word.copy(startMs = maxOf(0L, start), endMs = maxOf(40L, clippedEnd))
-        }.sortedBy { it.startMs }
+        val contentDuration = maxOf(
+            project.durationMs,
+            project.words.maxOfOrNull { it.safeEndMs } ?: 0L
+        )
+        val ranges = project.transform.sourceSegments(contentDuration)
+        val words = wordsForRanges(project.words, ranges).sortedBy { it.startMs }
         val events = buildEvents(words, style, width, height)
         return buildString {
             append(header(style, width, height))
             append("[Events]\n")
             append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n")
             events.forEach { append(it).append('\n') }
+        }
+    }
+
+    /** Maps source-time words onto the continuous timeline after split/delete edits. */
+    private fun wordsForRanges(words: List<CaptionWord>, ranges: List<VideoSegment>): List<CaptionWord> {
+        var outputOffset = 0L
+        return buildList {
+            ranges.forEach { range ->
+                words.forEach { word ->
+                    val start = maxOf(word.startMs, range.startMs)
+                    val end = minOf(word.safeEndMs, range.endMs)
+                    if (end > start) {
+                        add(word.copy(
+                            startMs = outputOffset + start - range.startMs,
+                            endMs = outputOffset + end - range.startMs
+                        ))
+                    }
+                }
+                outputOffset += range.durationMs
+            }
         }
     }
 

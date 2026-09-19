@@ -6,6 +6,8 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import com.saad.capvid.model.AspectRatio
 import com.saad.capvid.model.Project
+import com.saad.capvid.model.VideoSegment
+import com.saad.capvid.model.VideoTransform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -14,7 +16,13 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 class VideoExporter(private val context: Context) {
-    data class Metadata(val width: Int, val height: Int, val durationMs: Long, val fps: Float)
+    data class Metadata(
+        val width: Int,
+        val height: Int,
+        val durationMs: Long,
+        val fps: Float,
+        val hasAudio: Boolean = true
+    )
     data class Result(val output: File, val metadata: Metadata)
 
     suspend fun export(
@@ -72,7 +80,9 @@ class VideoExporter(private val context: Context) {
                 width = width.coerceAtLeast(2),
                 height = height.coerceAtLeast(2),
                 durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
-                fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()?.coerceIn(1f, 120f) ?: 30f
+                fps = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()?.coerceIn(1f, 120f) ?: 30f,
+                hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+                    ?.equals("yes", ignoreCase = true) ?: true
             )
         } finally {
             retriever.release()
@@ -89,14 +99,21 @@ class VideoExporter(private val context: Context) {
             project: Project,
             metadata: Metadata
         ): String {
-            val transform = project.transform
-            val end = transform.effectiveEnd(metadata.durationMs)
-            val duration = (end - transform.trimStartMs).coerceAtLeast(0L)
+            val ranges = project.transform.sourceSegments(metadata.durationMs)
+            val mergedRanges = mergeAdjacent(ranges)
+            if (mergedRanges.size > 1) {
+                return buildSegmentCommand(input, output, ass, fonts, project.transform, metadata, mergedRanges)
+            }
+
+            val range = mergedRanges.firstOrNull()
+            val startMs = range?.startMs ?: project.transform.trimStartMs
+            val endMs = range?.endMs ?: project.transform.effectiveEnd(metadata.durationMs)
+            val duration = (endMs - startMs).coerceAtLeast(0L)
             val filter = mutableListOf<String>()
-            transformFilter(transform, metadata)?.let(filter::add)
-            filter += "subtitles=${filterPath(ass)}:fontsdir=${filterPath(fonts)}"
-            val start = if (transform.trimStartMs > 0L) "-ss ${formatSeconds(transform.trimStartMs)} " else ""
-            val length = if (duration > 0L && (transform.trimStartMs > 0L || transform.trimEndMs > 0L)) "-t ${formatSeconds(duration)} " else ""
+            transformFilter(project.transform, metadata)?.let(filter::add)
+            filter += subtitleFilter(ass, fonts)
+            val start = if (startMs > 0L) "-ss ${formatSeconds(startMs)} " else ""
+            val length = if (duration > 0L && (startMs > 0L || endMs < metadata.durationMs)) "-t ${formatSeconds(duration)} " else ""
             return buildString {
                 append("-y ")
                 append(start)
@@ -105,8 +122,55 @@ class VideoExporter(private val context: Context) {
                 append("-map 0:v:0 -map 0:a? ")
                 append("-vf \"${filter.joinToString(",")}\" ")
                 append("-c:v libx264 -preset medium -crf 18 -fps_mode passthrough ")
+                // The ordinary trim path can retain the source audio bit-for-bit.
                 append("-c:a copy -movflags +faststart ")
                 append(shellQuote(output.absolutePath))
+            }
+        }
+
+        private fun buildSegmentCommand(
+            input: File,
+            output: File,
+            ass: File,
+            fonts: File,
+            transform: VideoTransform,
+            metadata: Metadata,
+            ranges: List<VideoSegment>
+        ): String {
+            val graph = StringBuilder()
+            ranges.forEachIndexed { index, range ->
+                graph.append("[0:v]trim=start=${formatSeconds(range.startMs)}:end=${formatSeconds(range.endMs)},setpts=PTS-STARTPTS[v$index];")
+                if (metadata.hasAudio) {
+                    graph.append("[0:a]atrim=start=${formatSeconds(range.startMs)}:end=${formatSeconds(range.endMs)},asetpts=PTS-STARTPTS[a$index];")
+                }
+            }
+            ranges.indices.forEach { index ->
+                graph.append("[v$index]")
+                if (metadata.hasAudio) graph.append("[a$index]")
+            }
+            graph.append("concat=n=${ranges.size}:v=1:a=${if (metadata.hasAudio) 1 else 0}[joinedv")
+            if (metadata.hasAudio) graph.append("][joineda]") else graph.append("]")
+            graph.append(';')
+            val visualFilter = transformFilter(transform, metadata)?.let { "$it," } ?: ""
+            graph.append("[joinedv]${visualFilter}${subtitleFilter(ass, fonts)}[outv]")
+
+            return buildString {
+                append("-y -i ${shellQuote(input.absolutePath)} ")
+                append("-filter_complex \"$graph\" ")
+                append("-map \"[outv]\" ")
+                if (metadata.hasAudio) append("-map \"[joineda]\" -c:a aac ") else append("-an ")
+                append("-c:v libx264 -preset medium -crf 18 -fps_mode passthrough -movflags +faststart ")
+                append(shellQuote(output.absolutePath))
+            }
+        }
+
+        private fun mergeAdjacent(ranges: List<VideoSegment>): List<VideoSegment> = buildList {
+            ranges.sortedBy { it.startMs }.forEach { range ->
+                val previous = lastOrNull()
+                if (previous != null && range.startMs <= previous.endMs) {
+                    removeAt(lastIndex)
+                    add(VideoSegment(previous.startMs, maxOf(previous.endMs, range.endMs)))
+                } else add(range)
             }
         }
 
@@ -135,6 +199,9 @@ class VideoExporter(private val context: Context) {
             }
             return filters.joinToString(",").ifBlank { null }
         }
+
+        private fun subtitleFilter(ass: File, fonts: File): String =
+            "subtitles=${filterPath(ass)}:fontsdir=${filterPath(fonts)}"
 
         private fun filterPath(file: File): String = "'${file.absolutePath.replace("'", "\\'")}'"
         private fun shellQuote(path: String): String = "'${path.replace("'", "'\\''")}'"

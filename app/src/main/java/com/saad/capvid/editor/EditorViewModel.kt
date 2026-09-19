@@ -88,6 +88,18 @@ class EditorViewModel(application: Application) : AndroidViewModel(application) 
         commit(base, base.copy(transform = transform), Commands::transform)
     }
 
+    fun splitAtPlayhead(playheadMs: Long) {
+        val base = _project.value ?: return
+        val split = base.transform.splitAt(playheadMs, base.durationMs)
+        if (split != base.transform) commit(base, base.copy(transform = split), Commands::splitClip)
+    }
+
+    fun deleteClip(index: Int) {
+        val base = _project.value ?: return
+        val changed = base.transform.deleteSegment(index, base.durationMs)
+        if (changed != base.transform) commit(base, base.copy(transform = changed), Commands::deleteClip)
+    }
+
     fun addManualCaption(text: String, startMs: Long, endMs: Long) {
         val base = _project.value ?: return
         val manual = com.saad.capvid.caption.WordGrouping.wordsFromText(text, startMs, endMs)

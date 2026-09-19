@@ -278,7 +278,15 @@ class EditorScreen(
 
     private fun showTrim() {
         currentProject?.let { project ->
-            TrimDialog(context, project.durationMs, project.transform, { viewModel.setTransform(it) }, player.currentPosition).apply {
+            TrimDialog(
+                context,
+                project.durationMs,
+                project.transform,
+                { viewModel.setTransform(it) },
+                player.currentPosition,
+                { viewModel.splitAtPlayhead(player.currentPosition) },
+                { viewModel.deleteClip(it) }
+            ).apply {
                 show(); window?.setLayout((resources.displayMetrics.widthPixels * 0.92f).toInt(), LayoutParams.WRAP_CONTENT)
             }
         }

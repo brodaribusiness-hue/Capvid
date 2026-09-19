@@ -16,7 +16,9 @@ class TrimDialog(
     private val durationMs: Long,
     private val initial: VideoTransform,
     private val onApply: (VideoTransform) -> Unit,
-    private val playheadMs: Long = 0L
+    private val playheadMs: Long = 0L,
+    private val onSplit: ((VideoTransform) -> Unit)? = null,
+    private val onDelete: ((Int) -> Unit)? = null
 ) : Dialog(context) {
     private val start = SeekBar(context)
     private val end = SeekBar(context)
@@ -37,19 +39,37 @@ class TrimDialog(
         body.addView(start)
         body.addView(endLabel.apply { setPadding(0, Ui.dp(context, 8f), 0, 0) })
         body.addView(end)
+        body.addView(Ui.button(context, "Split at playhead").apply {
+            setOnClickListener {
+                val split = initial.splitAt(playheadMs, durationMs)
+                (onSplit ?: onApply)(split)
+                dismiss()
+            }
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(context, 46f)).apply { topMargin = Ui.dp(context, 12f) })
+        if (initial.segments.size > 1) {
+            body.addView(Ui.text(context, "SPLIT CLIPS", 11f, ContextCompat.getColor(context, R.color.capvid_muted)).apply { setPadding(0, Ui.dp(context, 14f), 0, Ui.dp(context, 5f)) })
+            initial.sourceSegments(durationMs).forEachIndexed { index, segment ->
+                body.addView(Ui.button(context, "Delete clip ${index + 1}  (${format(segment.startMs)}–${format(segment.endMs)})").apply {
+                    setOnClickListener {
+                        if (onDelete != null) onDelete.invoke(index) else onApply(initial.deleteSegment(index, durationMs))
+                        dismiss()
+                    }
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(context, 44f)).apply { bottomMargin = Ui.dp(context, 5f) })
+            }
+        }
         body.addView(Ui.text(context, "PLAYHEAD ACTIONS", 11f, ContextCompat.getColor(context, R.color.capvid_muted)).apply { setPadding(0, Ui.dp(context, 14f), 0, Ui.dp(context, 5f)) })
         val playheadActions = Ui.horizontal(context, 6f)
-        playheadActions.addView(Ui.button(context, "Keep before playhead").apply {
+        playheadActions.addView(Ui.button(context, "Delete after playhead").apply {
             setOnClickListener {
                 val point = playheadMs.coerceIn(100L, durationMs)
-                onApply(initial.copy(trimStartMs = 0L, trimEndMs = point))
+                onApply(initial.copy(trimStartMs = 0L, trimEndMs = point, segments = emptyList()))
                 dismiss()
             }
         }, LinearLayout.LayoutParams(0, Ui.dp(context, 44f), 1f))
-        playheadActions.addView(Ui.button(context, "Keep after playhead").apply {
+        playheadActions.addView(Ui.button(context, "Delete before playhead").apply {
             setOnClickListener {
                 val point = playheadMs.coerceIn(0L, maxOf(0L, durationMs - 100L))
-                onApply(initial.copy(trimStartMs = point, trimEndMs = 0L))
+                onApply(initial.copy(trimStartMs = point, trimEndMs = 0L, segments = emptyList()))
                 dismiss()
             }
         }, LinearLayout.LayoutParams(0, Ui.dp(context, 44f), 1f))
@@ -68,7 +88,7 @@ class TrimDialog(
     private fun applyAndClose(maxSeconds: Int) {
         val inMs = start.progress * 1000L
         val outMs = maxOf(inMs + 100L, end.progress * 1000L).coerceAtMost(durationMs)
-        onApply(initial.copy(trimStartMs = inMs, trimEndMs = if (outMs >= durationMs - 500L) 0L else outMs))
+        onApply(initial.copy(trimStartMs = inMs, trimEndMs = if (outMs >= durationMs - 500L) 0L else outMs, segments = emptyList()))
         dismiss()
     }
 

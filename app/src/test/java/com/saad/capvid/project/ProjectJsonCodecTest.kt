@@ -32,6 +32,17 @@ class ProjectJsonCodecTest {
     }
 
     @Test
+    fun splitRangesRoundTripAndDeleteWithUndoFriendlyTransform() {
+        val split = VideoTransform().splitAt(5_000L, 10_000L)
+        assertEquals(listOf(0L, 5_000L), split.segments.map { it.startMs })
+        assertEquals(listOf(5_000L, 10_000L), split.segments.map { it.endMs })
+        val remaining = split.deleteSegment(0, 10_000L)
+        assertEquals(5_000L, remaining.trimStartMs)
+        assertEquals(0L, remaining.trimEndMs)
+        assertTrue(remaining.segments.isEmpty())
+    }
+
+    @Test
     fun legacyJsonUsesSafeDefaults() {
         val restored = ProjectJsonCodec.decode("{\"id\":\"legacy\",\"videoPath\":\"old.mp4\"}")
         assertEquals("legacy", restored.id)
